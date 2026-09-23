@@ -42,6 +42,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import zlib from 'node:zlib';
 import { createRequire } from 'node:module';
 import { execFile } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -2011,6 +2012,10 @@ function versionRelativeImports(code, v) {
     .replace(/(\bimport\s+)(["'])(\.{1,2}\/[^"'?]*)(\2)/g,      (_, a, q, p) => `${a}${q}${p}${tag}${q}`);
 }
 
+// gzip: text over 1 KiB — below that the framing outweighs the saving.
+const GZIP_MIN = 1024;
+const GZIP_TYPES = /^(text\/|application\/(javascript|json|xml))/;
+
 async function serveAsset(req, res, url) {
   const asset = resolveAssetSource(url.pathname);
   if (!asset) {
@@ -2062,8 +2067,22 @@ async function serveAsset(req, res, url) {
         return;
       }
     }
+    // Text assets ship gzipped when the client accepts it (a 304 never gets
+    // here, so only a cold load pays the compression). Fonts and images are
+    // compressed already and pass through as they are. `Vary` on every
+    // compressible asset so a shared cache never hands one client's encoding
+    // to another.
+    let out = Buffer.isBuffer(body) ? body : Buffer.from(String(body));
+    if (out.length >= GZIP_MIN && GZIP_TYPES.test(headers['Content-Type'] || '')) {
+      headers['Vary'] = 'Accept-Encoding';
+      if (/\bgzip\b/.test(req.headers['accept-encoding'] || '')) {
+        out = zlib.gzipSync(out);
+        headers['Content-Encoding'] = 'gzip';
+      }
+    }
+    headers['Content-Length'] = out.length;
     res.writeHead(200, headers);
-    res.end(body);
+    res.end(out);
   } catch (err) {
     console.error(`  ! build failed for ${url.pathname}:`, err.message);
     res.writeHead(500, { 'Content-Type': 'text/plain' });
