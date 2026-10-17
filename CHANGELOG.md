@@ -2,6 +2,10 @@
 
 Still pre-1.0 — anything in the shell surface (URLs, ctx shape, config schema) can move between minor versions until 1.0. The pace will slow as real users land, but for now: assume any 0.x bump may break a module that hardcoded an internal.
 
+## Unreleased
+
+**Modules can bring their own sidebar.** A module may now export `Sidebar` next to its default export; the shell hands it to the chrome (`loadedModules[qid].Sidebar`), which can render it in place of its rail while the module is active — the chrome keeps its own header row, so there is always a way back. `meta.sidebar: true` lets the chrome know before the bundle loads, so the rail can mark the module on first paint. Additive: modules without the export, and chromes that ignore it, behave exactly as before. See [Module sidebar](./docs/MODULES.md#module-sidebar--export-function-sidebar).
+
 ## 0.21.0
 
 **Text assets ship gzipped.** Every JavaScript, CSS and JSON asset over 1 KiB — the client bundle, React, the chrome's bundle and stylesheet, every module frontend — is compressed when the browser accepts gzip, with `Vary: Accept-Encoding` and an exact `Content-Length`. Measured on a real instance: a cold page load of 2.1 MB is 525 KB on the wire, four times less — on a 2 Mbit/s link, 9 seconds become 2. Repeat loads were already 304s (0.19.0) and stay that way: a matching ETag answers before any compression. Fonts and images pass through untouched; they are compressed already.

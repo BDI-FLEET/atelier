@@ -297,8 +297,9 @@ window.__atelier.useRoute = () => {
  * (workspace-qualified — same id in different workspaces gets distinct
  * URLs and distinct browser cache entries). Returns the namespace plus a
  * handful of well-known shape flags (default export → rendered module;
- * TopBarCenter → topbar slot claimer; chrome → chrome slot claimer; meta →
- * icon/name/group).
+ * TopBarCenter → topbar slot claimer; Sidebar → the module's own sidebar
+ * navigation, which a chrome may render in place of its rail while the
+ * module is active; chrome → chrome slot claimer; meta → icon/name/group).
  * ========================================================================= */
 async function loadModuleBundle(qid, bust) {
   // `bust` (a monotonic token) is appended only when re-importing a changed
@@ -311,11 +312,13 @@ async function loadModuleBundle(qid, bust) {
     const mod = await import(url);
     const Module = typeof mod.default === 'function' ? mod.default : null;
     const TopBarCenter = typeof mod.TopBarCenter === 'function' ? mod.TopBarCenter : null;
+    const Sidebar = typeof mod.Sidebar === 'function' ? mod.Sidebar : null;
     const ChromeFn = typeof mod.chrome === 'function' ? mod.chrome : null;
     return {
       status: 'ok',
       Module,
       TopBarCenter,
+      Sidebar,
       chrome: ChromeFn,
       hasDefault: !!Module,
       meta: mod.meta || {},
