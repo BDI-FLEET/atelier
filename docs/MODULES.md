@@ -287,15 +287,26 @@ import { SidebarBody, SidebarSection, SidebarItem, SidebarLabel, Icon } from '@a
 
 export const meta = { name: 'Contacts', icon: 'users', sidebar: true };
 
+const self = window.__atelier.self(import.meta.url);
 const SECTIONS = [['', 'Overview', 'layout-grid'], ['people', 'People', 'users'], ['map', 'Map', 'map']];
 
 export function Sidebar() {
   const { path, navigate } = window.__atelier.useRoute();
+  // A real href (new-tab clicks work, and a chrome can treat it as a place);
+  // the plain click routes in-app.
+  const link = (sub) => ({
+    href: `/${self.qid}${sub ? `/${sub}` : ''}`,
+    onClick: (e) => {
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+      e.preventDefault();
+      navigate(sub);
+    },
+  });
   return (
     <SidebarBody>
       <SidebarSection>
         {SECTIONS.map(([sub, name, icon]) => (
-          <SidebarItem key={sub} current={path.split('/')[0] === sub} onClick={() => navigate(sub)}>
+          <SidebarItem key={sub} current={path.split('/')[0] === sub} {...link(sub)}>
             <Icon name={icon} />
             <SidebarLabel>{name}</SidebarLabel>
           </SidebarItem>
@@ -312,7 +323,8 @@ export default function Module() {
 ```
 
 - **Share state through the route.** `Sidebar` and the default export render in different parts of the page, so they don't share React context — `useRoute` (or `ctx.module`-backed data) is what keeps them in agreement, and it makes every sidebar entry deep-linkable.
-- **Build it from the chrome's kit** — the sidebar primitives and icons the chrome itself uses — so it reads as part of the shell. The primitives a chrome publishes are its own choice (see [Publishing primitives](#publishing-primitives--atelierkit)).
+- **Build it from the chrome's kit** — the sidebar primitives and icons the chrome itself uses — so it reads as part of the shell. The primitives a chrome publishes are its own choice (see [Publishing primitives](#publishing-primitives--atelierkit)); a chrome that supports module sidebars documents which ones to use, and what it draws itself, in its own README.
+- **Places get an `href`, actions don't.** Build a navigational entry's `href` from `self(import.meta.url).qid` (never a literal path) and route the plain click through `navigate` — new-tab clicks work, and a chrome can tell places from actions.
 - **No `eager` needed.** The sidebar only shows while its module is active, and the active module's bundle is always loaded. Add `sidebar: true` to `meta` if you want the rail to mark the module before its first visit.
 - **What the chrome does with it** — the header, the transition, keyboard navigation — is the chrome's call, like everything visual.
 
