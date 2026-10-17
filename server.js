@@ -2012,6 +2012,25 @@ function versionRelativeImports(code, v) {
     .replace(/(\bimport\s+)(["'])(\.{1,2}\/[^"'?]*)(\2)/g,      (_, a, q, p) => `${a}${q}${p}${tag}${q}`);
 }
 
+// The shell's own build inputs, fingerprinted once per process. A BUILT asset
+// (a module or chrome bundle, the chrome's CSS) depends on them as much as on
+// the module's sources — the JSX shims, build.js, the installed esbuild /
+// Tailwind / React — so they are part of its ETag. Without this, a shell change
+// ships new bytes under an old mtime-keyed ETag and browsers keep their stale
+// copy (a 304) after the restart or upgrade. Shell files are pinned to the
+// process, so computing it at startup is exact.
+const BUILD_FINGERPRINT = (() => {
+  const h = crypto.createHash('sha1');
+  const add = (f) => { try { h.update(f).update(fs.readFileSync(f)); } catch {} };
+  add(path.join(HOST_DIR, 'build.js'));
+  add(path.join(HOST_DIR, 'package.json'));
+  try { for (const f of fs.readdirSync(path.join(HOST_DIR, 'shims')).sort()) add(path.join(HOST_DIR, 'shims', f)); } catch {}
+  for (const dep of ['esbuild', '@tailwindcss/node', 'react']) {
+    try { h.update(dep + '@' + hostRequire(`${dep}/package.json`).version); } catch {}
+  }
+  return h.digest('hex').slice(0, 8);
+})();
+
 // gzip: text over 1 KiB — below that the framing outweighs the saving.
 const GZIP_MIN = 1024;
 const GZIP_TYPES = /^(text\/|application\/(javascript|json|xml))/;
@@ -2042,19 +2061,19 @@ async function serveAsset(req, res, url) {
       // Cold loads carry no `?v`, so this is inert for normal serving.
       const v = isModuleFrontend && url.searchParams.get('v');
       body = (v && /^\d+$/.test(v)) ? versionRelativeImports(built.content, v) : built.content;
-      etag = `"${built.mtimeMs}${v ? `-${v}` : ''}"`;
+      etag = `"${BUILD_FINGERPRINT}-${built.mtimeMs}${v ? `-${v}` : ''}"`;
     } else if (asset.kind === 'css') {
       const built = await getCss(asset.src, cssScanSources(), HOST_DIR);
       headers['Content-Type'] = built.contentType;
       body = built.content;
-      etag = `"${built.mtimeMs}"`;
+      etag = `"${BUILD_FINGERPRINT}-${built.mtimeMs}"`;
     } else {
       headers['Content-Type'] = asset.contentType;
       body = fs.readFileSync(asset.src);
       try { etag = `"${fs.statSync(asset.src).mtimeMs}"`; } catch {}
     }
-    // Conditional serving — the builds are mtime-keyed already, so the key IS
-    // the validator. `no-cache` means "revalidate every time": a repeat page
+    // Conditional serving — the builds are mtime-keyed already, so the key (plus
+    // the shell's BUILD_FINGERPRINT for built assets) IS the validator. `no-cache` means "revalidate every time": a repeat page
     // load costs a 304 instead of re-downloading multi-MB dev bundles, while
     // an edited file (new mtime → new ETag) ships fresh bytes immediately —
     // hot-reload semantics untouched.
