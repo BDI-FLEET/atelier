@@ -38,7 +38,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { resolveHost, askHost, hostAnswer, COMPUTERS_PATH } from './session.js';
+import { resolveHost, askHost, hostAnswer, grantMissing, COMPUTERS_PATH } from './session.js';
 import { inSandbox } from './sandbox.js';
 import { DEFAULT_REMOTE, GITIGNORE, git, gitToken, gitWithToken, remoteUrl, setRemote } from './repo.js';
 import { failer, sessionAt } from './ops.js';
@@ -70,7 +70,7 @@ const host = resolveHost(opts.host);
 const { session } = sessionAt(host, fail);
 
 // 1 · the computer the app runs on, among yours
-const missing = `the grant is missing: maintain on ${app}`;
+const missing = grantMissing(app);
 const listed = hostAnswer(await askHost(host, 'GET', COMPUTERS_PATH, { session }), host, fail, { missing });
 const runs = (c) => Array.isArray(c?.modules) && c.modules.some((m) => m && m.label === app);
 let found = (Array.isArray(listed.computers) ? listed.computers : []).filter((c) => c && typeof c.label === 'string' && (!opts.computer || c.label === opts.computer) && runs(c));
@@ -91,7 +91,7 @@ const code = await gitWithToken('clone', url, token, { flags: ['-q', '-o', DEFAU
 if (code !== 0) fail(`git could not clone ${app}`, 1);
 
 // 4 · the remote atelier as `atelier remote` sets it: the host you signed in at, the computer, the app
-if (!setRemote(dir, DEFAULT_REMOTE, remoteUrl(host, computer, app))) fail(`git could not set the remote "${DEFAULT_REMOTE}"`, 1);
+setRemote(dir, DEFAULT_REMOTE, remoteUrl(host, computer, app), fail);
 if (!fs.existsSync(path.join(dir, '.gitignore'))) fs.writeFileSync(path.join(dir, '.gitignore'), GITIGNORE);
 const short = git(dir, ['rev-parse', `--short=${SHORT_SHA_CHARS}`, 'HEAD']).out || 'no commit yet';
 console.log(`cloned ${app} at ${short} · remote ${DEFAULT_REMOTE} → ${computer}`);

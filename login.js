@@ -29,7 +29,7 @@ import readline from 'node:readline/promises';
 import os from 'node:os';
 import fs from 'node:fs';
 import { screen, openBrowser, copyText, colourDepth, SCENE_WIDTH } from './login-screen.js';
-import { readCredentials, resolveHost, askHost, sessionFor, keepSession, sentenceOf, unreachable, localTime } from './session.js';
+import { readCredentials, resolveHost, askHost, sessionFor, keepSession, sentenceOf, hostAnswered, unreachable, localTime } from './session.js';
 import { failer, INTERRUPTED } from './ops.js';
 import { LOGIN_ASK_MS, LOGIN_CODE_MS, SPINNER_MS } from './limits.js';
 import { readArgs, helpOf, HOST } from './args.js';
@@ -126,7 +126,7 @@ async function activate() {
       process.exit(0);
     }
     if (r.status === 200 && r.body.state === 'spent') refuse('this code was used already; run atelier login again');
-    if (r.status !== 0 && r.status !== 200) refuse(sentenceOf(r, `the host at ${host} answered ${r.status}`));
+    if (r.status !== 0 && r.status !== 200) refuse(sentenceOf(r, hostAnswered(host, r.status)));
     if (Date.now() + LOGIN_ASK_MS > until) refuse('the code expired; run atelier login again');
     await new Promise((done) => setTimeout(done, LOGIN_ASK_MS));
   }

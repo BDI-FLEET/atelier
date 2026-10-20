@@ -24,9 +24,9 @@
  * Kept dependency-free (node builtins + global fetch).
  */
 import os from 'node:os';
-import { readCredentials, askHost, sessionFor, sentenceOf, notSignedIn, unreachable, hostAnswer, exitOfRefusal } from './session.js';
+import { readCredentials, askHost, sessionFor, sentenceOf, notSignedIn, unreachable, hostAnswer, hostAnswered, exitOfRefusal } from './session.js';
 import { inSandbox, askSocket } from './sandbox.js';
-import { DEFAULT_REMOTE, moduleHere, parseRemote, remoteOf } from './repo.js';
+import { DEFAULT_REMOTE, NOT_A_MODULE_FOLDER, moduleHere, parseRemote, remoteOf } from './repo.js';
 import { readArgs, REMOTE } from './args.js';
 import { OP_QUIET_MS, OP_FOLLOW_MS, MACHINE_NAME_CHARS } from './limits.js';
 
@@ -40,7 +40,7 @@ export const failer = (name) => (msg, code = 2) => { console.error(`\natelier ${
 export function whereOf(remote, fail, verb) {
   if (remote === null) fail(`without -r it acts on your own instance, which this CLI does not do · atelier ${verb} -r ${DEFAULT_REMOTE}`, 1);
   const mod = moduleHere();
-  if (!mod) fail('not in a module folder: a git repository with a module.json (atelier create makes one)');
+  if (!mod) fail(NOT_A_MODULE_FOLDER);
   const url = remoteOf(mod.dir, remote);
   const where = url && parseRemote(url);
   if (!where) fail(`remote "${remote}" not set: atelier remote <computer>${remote === DEFAULT_REMOTE ? '' : ` --name ${remote}`}`);
@@ -90,7 +90,7 @@ export async function runOp(name, target, op, { during, socket, onFrame = printF
   const id = started.op;
   const into = async (body) => {
     const x = await askHost(target.host, 'POST', `/api/ops/${id}/in`, { session, body });
-    if (x.status !== 200) throw new Error(sentenceOf(x, `the host answered ${x.status}`));
+    if (x.status !== 200) throw new Error(sentenceOf(x, hostAnswered(target.host, x.status)));
     return x.body;
   };
   const ac = new AbortController();
@@ -98,7 +98,7 @@ export async function runOp(name, target, op, { during, socket, onFrame = printF
   let res;
   try { res = await fetch(`${target.host}/api/ops/${id}/stream`, { headers: { authorization: `Session ${session}`, accept: 'application/x-ndjson' }, signal: ac.signal }); }
   catch { fail(unreachable(target.host), 1); }
-  if (res.status !== 200) fail(`the host answered ${res.status} for the op's stream`, 1);
+  if (res.status !== 200) fail(`${hostAnswered(target.host, res.status)} for the op's stream`, 1);
   let buf = '', code = null, side = null;
   const dec = new TextDecoder();
   try {

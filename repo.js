@@ -62,16 +62,18 @@ export function parseRemote(url) {
   return { host: normalHost(u.origin + m[1]), computer: decodeURIComponent(m[2]), module: decodeURIComponent(m[3]) };
 }
 
+export const NOT_A_MODULE_FOLDER = 'not in a module folder: a git repository with a module.json (atelier create makes one)';
+
 /* The URL of a named remote on the module's repository, or null. */
 export function remoteOf(dir, name) {
   const r = git(dir, ['remote', 'get-url', name]);
   return r.code === 0 && r.out ? r.out : null;
 }
 
-/* Add the remote, or point it elsewhere when it exists. */
-export function setRemote(dir, name, url) {
+/* Add the remote, or point it elsewhere when it exists; the verb fails when git cannot. */
+export function setRemote(dir, name, url, fail) {
   const had = remoteOf(dir, name) !== null;
-  return git(dir, had ? ['remote', 'set-url', name, url] : ['remote', 'add', name, url]).code === 0;
+  if (git(dir, had ? ['remote', 'set-url', name, url] : ['remote', 'add', name, url]).code !== 0) fail(`git could not set the remote "${name}"`, 1);
 }
 
 /* A token from the host for one `op` (clone or push) of one app, on your session, and the http(s) address to use it at:

@@ -1,22 +1,11 @@
 // Every wait, size and count of the hosted CLI, the backend processes and module-serve is one named constant in
-// limits.js with its sentence: the files below write none of the shapes a number of that kind takes, and a path or a
-// header they share is written once.
+// limits.js with its sentence: the files ours.js lists write none of the shapes a number of that kind takes, and a path
+// or a header they share is written once.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import fs from 'node:fs'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { FILES, read, codeLines } from './ours.js'
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const PLACE = 'limits.js'
-
-const FILES = [
-  'agent-attach.js', 'agent.js', 'args.js', 'attach-client.js', 'attach.js', 'backend-host.js', 'clone.js',
-  'computers.js', 'config.js', 'create.js', 'data.js', 'files.js', 'frame.jsx', 'login-screen.js', 'login.js',
-  'logout.js', 'logs.js', 'module-json.js', 'module-serve.js', 'modules-git.js', 'ops.js', 'ps.js', 'push.js',
-  'releases.js', 'remote.js', 'repo.js', 'restart.js', 'router.js', 'run.js', 'sandbox.js', 'session.js',
-  'whoami.js', 'ws-bridge.js',
-]
 
 const SHAPES = [
   ['a product of numbers', /\b\d[\d_]*\s*\*\s*\d/],
@@ -36,19 +25,16 @@ const PORT = ['a port in an address', /\/\/[\w.[\]:-]+:\d{2,5}\b/]
 
 const SHARED = ["'/api/computers'", "'x-atelier-caller'", "'x-atelier-shell'", "'module.json'", "'backend.js'", "'frontend.jsx'", "'data.tar'"]
 
-const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8')
-const isComment = (line) => /^\s*(?:\/\/|\/\*|\*)/.test(line)
 const withoutQuoted = (line) => line.replace(/'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"/g, "''")
 
 test('the files of the hosted CLI write no wait, size or count as a number: each is a named constant read from limits.js', () => {
   const found = []
   for (const f of FILES) {
-    read(f).split('\n').forEach((line, i) => {
-      if (isComment(line)) return
+    for (const { line, at } of codeLines(f)) {
       const code = withoutQuoted(line)
-      for (const [kind, shape] of SHAPES) if (shape.test(code)) found.push(`${f}:${i + 1} ${kind}: ${line.trim()}`)
-      if (PORT[1].test(line)) found.push(`${f}:${i + 1} ${PORT[0]}: ${line.trim()}`)
-    })
+      for (const [kind, shape] of SHAPES) if (shape.test(code)) found.push(`${f}:${at} ${kind}: ${line.trim()}`)
+      if (PORT[1].test(line)) found.push(`${f}:${at} ${PORT[0]}: ${line.trim()}`)
+    }
   }
   assert.deepEqual(found, [])
 })

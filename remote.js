@@ -17,8 +17,8 @@
  * or outside a module folder · 3 not signed in on that host · 4 the computer is
  * not one you hold a grant on.
  */
-import { resolveHost, askHost, hostAnswer, COMPUTERS_PATH } from './session.js';
-import { DEFAULT_REMOTE, moduleHere, remoteUrl, setRemote } from './repo.js';
+import { resolveHost, askHost, hostAnswer, grantMissing, COMPUTERS_PATH } from './session.js';
+import { DEFAULT_REMOTE, NOT_A_MODULE_FOLDER, moduleHere, remoteUrl, setRemote } from './repo.js';
 import { failer, sessionAt } from './ops.js';
 import { readArgs, helpOf, HOST } from './args.js';
 
@@ -40,15 +40,15 @@ if (!computer) fail(`which computer? atelier computers lists them\n\n${helpOf(SP
 if (!NAME.test(computer)) fail(`"${computer}" isn't a computer's name\n\n${helpOf(SPEC)}`);
 
 const mod = moduleHere();
-if (!mod) fail('not in a module folder: a git repository with a module.json (atelier create makes one)');
+if (!mod) fail(NOT_A_MODULE_FOLDER);
 
 const host = resolveHost(opts.host);
 const { session } = sessionAt(host, fail);
 const listed = hostAnswer(await askHost(host, 'GET', COMPUTERS_PATH, { session }), host, fail);
 const found = (Array.isArray(listed.computers) ? listed.computers : []).find((c) => c && c.label === computer);
 // the same answer for a computer that is not yours and one that does not exist
-if (!found) fail(`the grant is missing: maintain on ${computer}`, 4);
+if (!found) fail(grantMissing(computer), 4);
 
-if (!setRemote(mod.dir, name, remoteUrl(host, computer, mod.name))) fail(`git could not set the remote "${name}"`, 1);
+setRemote(mod.dir, name, remoteUrl(host, computer, mod.name), fail);
 const ws = Array.isArray(found.workspaces) && found.workspaces.length ? found.workspaces.map((w) => w?.name ?? w).join(', ') : 'main';
 console.log(`remote${name === DEFAULT_REMOTE ? '' : ` "${name}"`} → ${computer} · workspaces: ${ws}`);

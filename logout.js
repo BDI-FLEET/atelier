@@ -7,7 +7,7 @@
  * host cannot be reached the session is still forgotten here; on the host
  * it ends at its expiry.
  */
-import { readCredentials, writeCredentials, resolveHost, askHost, sessionFor, unreachable } from './session.js';
+import { readCredentials, writeCredentials, resolveHost, askHost, sessionFor, unreachable, notSignedIn } from './session.js';
 import { failer } from './ops.js';
 import { readArgs, HOST } from './args.js';
 
@@ -15,7 +15,7 @@ const { opts } = readArgs(process.argv.slice(2), { usage: 'atelier logout [--hos
 
 const creds = readCredentials();
 const host = resolveHost(opts.host);
-if (!creds[host]) { console.log(`\n  not signed in at ${host}\n`); process.exit(0); }
+if (!creds[host]) { console.log(`\n  ${notSignedIn(host, { hint: false })}\n`); process.exit(0); }
 
 const entry = sessionFor(creds, host);
 const gone = entry ? (await askHost(host, 'POST', '/api/logout', { session: entry.session })).status === 0 : false;

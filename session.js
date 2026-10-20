@@ -86,7 +86,17 @@ export const sentenceOf = (r, fallback) =>
 
 export const unreachable = (host) => `the host at ${host} cannot be reached`;
 
-export const notSignedIn = (host) => `not signed in at ${host} · atelier login${host === resolveHost() ? '' : ` --host ${host}`}`;
+/* Not signed in at a host; with `hint`, the verb that signs in there. */
+export const notSignedIn = (host, { hint = true } = {}) =>
+  `not signed in at ${host}${hint ? ` · atelier login${host === resolveHost() ? '' : ` --host ${host}`}` : ''}`;
+
+/* A status the verb did not expect from the host. */
+export const hostAnswered = (host, status) => `the host at ${host} answered ${status}`;
+
+export const GRANT_MISSING = 'the grant is missing';
+
+/* The grant a verb needs on `where` is not the person's. */
+export const grantMissing = (where) => `${GRANT_MISSING}: maintain on ${where}`;
 
 /* The exit a refusal gives by its status, the host's or a computer's on the socket: 2 written wrongly, 3 not signed in,
  * 4 the grant is missing, any other refusal 1. */
@@ -95,10 +105,10 @@ export const exitOfRefusal = (status) => REFUSAL_EXITS[status] ?? 1;
 
 /* The host's answer, when it is the one asked for (status `ok`); else the verb fails, as every verb does, its exit
  * from the status (1 when the host cannot be reached) and the host's sentence (`missing` for a 403 that gives none). */
-export function hostAnswer(r, host, fail, { ok = 200, missing = 'the grant is missing', otherwise } = {}) {
+export function hostAnswer(r, host, fail, { ok = 200, missing = GRANT_MISSING, otherwise } = {}) {
   if (r.status === 0) fail(unreachable(host), 1);
   if (r.status === 401) fail(notSignedIn(host), exitOfRefusal(r.status));
-  const fallback = r.status === 403 ? missing : r.status === 400 ? 'written wrongly' : otherwise ?? `the host at ${host} answered ${r.status}`;
+  const fallback = r.status === 403 ? missing : r.status === 400 ? 'written wrongly' : otherwise ?? hostAnswered(host, r.status);
   if (r.status !== ok) fail(sentenceOf(r, fallback), exitOfRefusal(r.status));
   return r.body;
 }

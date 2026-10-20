@@ -24,7 +24,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { readCredentials, resolveHost, askHost, sessionFor, unreachable, COMPUTERS_PATH } from './session.js';
+import { readCredentials, resolveHost, askHost, sessionFor, unreachable, notSignedIn, COMPUTERS_PATH } from './session.js';
 import { DEFAULT_REMOTE, GITIGNORE, appLabel, git, remoteUrl, setRemote } from './repo.js';
 import { failer } from './ops.js';
 import { MODULE_JSON, BACKEND_FILE, FRONTEND_FILE } from './module-json.js';
@@ -88,12 +88,12 @@ if (paths.length) {
 // the remote atelier, to your own computer, when signed in
 const host = resolveHost(opts.host);
 const entry = sessionFor(readCredentials(), host);
-const later = `project ${name} · not signed in: run atelier login, then atelier remote <computer>`;
+const later = `project ${name} · ${notSignedIn(host)}, then atelier remote <computer>`;
 if (!entry) { console.log(later); process.exit(0); }
 const r = await askHost(host, 'GET', COMPUTERS_PATH, { session: entry.session });
 if (r.status === 401) { console.log(later); process.exit(0); }
 if (r.status === 0) { console.log(`project ${name} · ${unreachable(host)}: atelier remote <computer> later`); process.exit(0); }
 const own = r.status === 200 && Array.isArray(r.body.computers) ? r.body.computers.find((c) => c && c.kind === 'own' && c.label) : null;
 if (!own) { console.log(`project ${name} · no computer of your own at ${host}: atelier remote <computer>`); process.exit(0); }
-if (!setRemote(dir, DEFAULT_REMOTE, remoteUrl(host, own.label, label))) fail(`git could not set the remote "${DEFAULT_REMOTE}"`, 1);
+setRemote(dir, DEFAULT_REMOTE, remoteUrl(host, own.label, label), fail);
 console.log(`project ${name} · in your space · remote "${DEFAULT_REMOTE}" set`);

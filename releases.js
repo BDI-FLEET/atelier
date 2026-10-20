@@ -21,7 +21,7 @@
  * outside a module folder, or no such remote · 3 not signed in at the remote's
  * host · 4 the grant is missing (maintain).
  */
-import { askHost, hostAnswer, localTime } from './session.js';
+import { askHost, hostAnswer, grantMissing, localTime } from './session.js';
 import { DEFAULT_REMOTE } from './repo.js';
 import { failer, sessionAt, whereOf } from './ops.js';
 import { SHORT_SHA_CHARS } from './limits.js';
@@ -34,7 +34,7 @@ const { host, computer, module } = whereOf(opts.remote ?? DEFAULT_REMOTE, fail, 
 
 const q = new URLSearchParams({ computer, module });
 const answer = hostAnswer(await askHost(host, 'GET', `/api/releases?${q}`, { session: sessionAt(host, fail).session }), host, fail,
-  { missing: `the grant is missing: maintain on ${computer}` });
+  { missing: grantMissing(computer) });
 
 // a push names its commit; an entry that is not a push (a restart, a config change, a data push) names its words
 const list = (Array.isArray(answer.releases) ? answer.releases : []).filter((x) => x && (x.commit || typeof x.op === 'string'))

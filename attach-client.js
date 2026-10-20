@@ -56,7 +56,7 @@
  *
  * Dependency-free: node builtins and global fetch with a streaming body.
  */
-import { resolveHost, askHost, sentenceOf, hostAnswer, unreachable, notSignedIn, normalHost, COMPUTERS_PATH } from './session.js';
+import { resolveHost, askHost, sentenceOf, hostAnswer, hostAnswered, unreachable, notSignedIn, normalHost, COMPUTERS_PATH } from './session.js';
 import { DEFAULT_REMOTE, moduleHere, parseRemote, remoteOf } from './repo.js';
 import { failer, sessionAt } from './ops.js';
 import { readArgs, helpOf, HOST } from './args.js';
@@ -122,7 +122,7 @@ export async function targetFor(typed, host, session, fail) {
   const mod = moduleHere();
   const remote = mod && parseRemote(remoteOf(mod.dir, DEFAULT_REMOTE) ?? '');
   if (remote && normalHost(remote.host) === host) return `${idOf(remote.computer)}/${workspace}`;
-  if (list === null) fail(sentenceOf(r, `the host at ${host} answered ${r.status}`), 1);
+  if (list === null) fail(sentenceOf(r, hostAnswered(host, r.status)), 1);
   if (list.length === 1) return `${list[0].id}/${workspace}`;
   // several and no remote: written wrongly (exit 2), the names to pick from and the two ways to pick
   if (list.length > 1) fail(`which computer? you are in ${list.length}: ${list.map((c) => c.label).join(', ')} · name one, `

@@ -46,6 +46,7 @@
 import { inSandbox, askSocket } from './sandbox.js';
 import { DEFAULT_REMOTE, git, gitToken, gitWithToken } from './repo.js';
 import { failer, sessionAt, socketAnswer, whereOf } from './ops.js';
+import { grantMissing } from './session.js';
 import { readArgs } from './args.js';
 import { PUSH_QUIET_MS, SHORT_SHA_CHARS } from './limits.js';
 
@@ -94,7 +95,7 @@ if (inSandbox()) {
 
 // the session at the remote's host, a token for this one push, and git pushing with it; the remote lines kept for the verdict
 const { session } = sessionAt(host, fail);
-const { url: target, token } = await gitToken('push', host, session, { computer, module }, fail, `the grant is missing: maintain on ${computer}`);
+const { url: target, token } = await gitToken('push', host, session, { computer, module }, fail, grantMissing(computer));
 let said = '';
 const code = await gitWithToken('push', target, token, { after: [`+${source}:refs/heads/main`], cwd: where.dir, onStderr: (d) => { said += d; } }, fail);
 verdict(code, said);
