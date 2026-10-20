@@ -237,7 +237,7 @@ async function fakeComputer(dir) {
         }
         if (r.verb !== 'push') { send({ refused: 'not this verb' }); continue }
         const url = g(cwd, 'remote', 'get-url', r.remote || 'atelier')
-        if (!url.endsWith('/git/alex/reading-list.git') || r.module !== 'reading-list') { send({ refused: NO_GRANT }); continue }
+        if (!url.endsWith('/git/alex/reading-list.git') || r.module !== 'reading-list') { send({ refused: NO_GRANT, status: 403 }); continue }
         const git = spawn('git', ['-c', 'credential.helper=', 'push', url, `+${r.commit}:refs/heads/main`],
           { cwd, stdio: ['ignore', 'pipe', 'pipe', 'pipe'], env: { ...process.env, GIT_ASKPASS: askpass, GIT_TERMINAL_PROMPT: '0' } })
         git.stdio[3].end(`${TOKEN}\n`)
@@ -274,6 +274,42 @@ test('inside a sandbox, push asks the computer to push: no session, no token in 
     assert.match(no.stderr, new RegExp(NO_GRANT))
     assert.equal(g(host.bare, 'rev-parse', 'main'), sha)
   } finally { await sup.close(); await host.close() }
+})
+
+// a computer's socket that takes the hello and refuses every request with `refusal`
+async function refusingComputer(refusal) {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'atelier-sock-')), 'computer.sock')
+  const server = net.createServer((c) => {
+    let buf = ''
+    c.setEncoding('utf8')
+    c.on('data', (d) => {
+      buf += d
+      for (let nl = buf.indexOf('\n'); nl >= 0; nl = buf.indexOf('\n')) {
+        const r = JSON.parse(buf.slice(0, nl)); buf = buf.slice(nl + 1)
+        c.write(JSON.stringify(r.verb === 'hello' ? { ok: true, sandbox: r.sandbox, id: r.id } : { ...refusal, id: r.id }) + '\n')
+      }
+    })
+  })
+  await new Promise((r) => server.listen(file, r))
+  return { env: { ATELIER_SOCKET: file, ATELIER_SANDBOX: 'sandbox:3d9f04' }, close: () => new Promise((r) => server.close(r)) }
+}
+
+test('inside a sandbox a refusal on the socket exits by its status, never by its words: 403 exits 4, 400 exits 2, one without a status 1', async () => {
+  const h = home(null)
+  const dir = moduleFolder(h, 'http://127.0.0.1:9/git/alex/reading-list.git')
+  const cases = [
+    [{ refused: 'nothing of yours runs here', status: 403 }, 4],
+    [{ refused: `${NO_GRANT}, as the computer reads it`, status: 400 }, 2],
+    [{ refused: NO_GRANT }, 1],
+  ]
+  for (const [refusal, code] of cases) {
+    const computer = await refusingComputer(refusal)
+    try {
+      const r = await cli(h, dir, ['push'], null, computer.env)
+      assert.equal(r.code, code, r.out)
+      assert.ok(r.stderr.includes(refusal.refused), 'the sentence is kept for the person')
+    } finally { await computer.close() }
+  }
 })
 
 test('create makes a module repository with the remote atelier set to your own computer', async () => {

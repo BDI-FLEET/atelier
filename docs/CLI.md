@@ -65,9 +65,9 @@ checkout the hello named, asks the host for the one-push token on the sandbox's 
 apart from any person's), and runs the git push itself with it: the token never reaches the agent, which sees the
 remote: lines and nothing else.
 The answer streams: one `{ line, id }` per line git printed, as it prints it, then `{ ok: true, code }` (git's exit code),
-or `{ refused: '<the host's sentence>' }` before any git runs. The CLI prints the lines on stderr as git would and reads
-the same verdict from them; the exit codes are the same (a refusal that names the grant is 4, anything else 1; there is
-no 3: a sandbox is never signed in). Nothing of the token is in the CLI's process, its environment or a file in the
+or `{ refused: '<the host's sentence>', status }` before any git runs. The CLI prints the lines on stderr as git would and
+reads the same verdict from them; the exit codes are the host's, from the refusal's status (400 is 2, 401 is 3, 403 is 4,
+anything else or no status 1), whatever the sentence says. Nothing of the token is in the CLI's process, its environment or a file in the
 sandbox. The receiver records the push as by the sandbox's agent from `<computer>/<sandbox>`, so `atelier releases` shows
 `by agent · from k1/main`.
 
@@ -123,7 +123,7 @@ app), the host checks the grant and sends the op to that computer, and what the 
 **Inside a sandbox** (`ATELIER_SOCKET`, `ATELIER_SANDBOX`), no session: after the hello, one socket request
 `op { computer?, module?, workspace?, op, values?, prompt?, into?, from? }`; the computer asks the host on the sandbox's
 own maintain grant (as for a push) and does it, streaming `{ line, id }` and `{ out, id }`, then
-`{ ok: true, code }`, or `{ refused }` before anything ran. What the host's `/in` carries rides the request instead:
+`{ ok: true, code }`, or `{ refused, status }` before anything ran. What the host's `/in` carries rides the request instead:
 `values` (config set), `prompt` (agent new); a data snapshot is a file in the caller's folder (`into` for a pull, `from`
 for a push). Only the apps of the sandbox's own computer; a run gets no input there; files are a machine's verb.
 

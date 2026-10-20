@@ -24,7 +24,7 @@
  * Kept dependency-free (node builtins + global fetch).
  */
 import os from 'node:os';
-import { readCredentials, askHost, sessionFor, sentenceOf, notSignedIn, unreachable, hostAnswer } from './session.js';
+import { readCredentials, askHost, sessionFor, sentenceOf, notSignedIn, unreachable, hostAnswer, exitOfRefusal } from './session.js';
 import { inSandbox, askSocket } from './sandbox.js';
 import { DEFAULT_REMOTE, moduleHere, parseRemote, remoteOf } from './repo.js';
 import { readArgs, REMOTE } from './args.js';
@@ -54,10 +54,11 @@ export function sessionAt(host, fail) {
   return entry;
 }
 
-/* The computer's answer on the socket: its code, or the verb fails (1 unreachable or refused, 4 the grant is missing). */
+/* The computer's answer on the socket: its code, or the verb fails with the computer's sentence, its exit from the
+ * refusal's status as from the host's (1 when the socket cannot be reached or the refusal has no status). */
 export function socketAnswer(a, fail, what) {
   if (a.unreachable) fail(a.refused, 1);
-  if (typeof a.refused === 'string') fail(a.refused, /^the grant is missing/.test(a.refused) ? 4 : 1);
+  if (typeof a.refused === 'string') fail(a.refused, exitOfRefusal(a.status));
   if (!a.ok || typeof a.code !== 'number') fail(`the computer did not say how the ${what} ended`, 1);
   return a.code;
 }

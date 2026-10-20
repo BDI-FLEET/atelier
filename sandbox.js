@@ -6,6 +6,8 @@
  * and ATELIER_SANDBOX (which sandbox it says it is). The socket speaks JSON
  * lines: a `hello { sandbox, cwd }` first (the computer checks who is
  * calling), then one request per line, each answered on one line with its id.
+ * A refusal is `{ refused, status }`: the sentence for the person, the status
+ * (as the host's: 403 the grant is missing, 400 written wrongly) for the exit.
  *
  * Kept free of packages (node builtins and limits.js only).
  */
@@ -39,7 +41,7 @@ export function askSocket(request, { timeoutMs = SOCKET_ANSWER_MS, onLine, onFra
         buf = buf.slice(nl + 1);
         if (!a) continue;
         if (a.id === 1) {
-          if (!a.ok) return end({ refused: a.refused || 'the computer refused the hello' });
+          if (!a.ok) return end({ refused: a.refused || 'the computer refused the hello', status: a.status });
           c.write(JSON.stringify({ ...request, id: 2 }) + '\n');
         } else if (a.id === 2 && (typeof a.line === 'string' || typeof a.out === 'string') && a.ok === undefined && a.refused === undefined) {
           clearTimeout(t); t = setTimeout(late, timeoutMs);

@@ -88,15 +88,18 @@ export const unreachable = (host) => `the host at ${host} cannot be reached`;
 
 export const notSignedIn = (host) => `not signed in at ${host} · atelier login${host === resolveHost() ? '' : ` --host ${host}`}`;
 
-/* The host's answer, when it is the one asked for (status `ok`); else the verb fails, as every verb does: 1 the host
- * cannot be reached or refused, 2 written wrongly, 3 not signed in at that host, 4 the grant is missing (the host's
- * sentence names it, `missing` when it gives none). */
+/* The exit a refusal gives by its status, the host's or a computer's on the socket: 2 written wrongly, 3 not signed in,
+ * 4 the grant is missing, any other refusal 1. */
+const REFUSAL_EXITS = Object.freeze({ 400: 2, 401: 3, 403: 4 });
+export const exitOfRefusal = (status) => REFUSAL_EXITS[status] ?? 1;
+
+/* The host's answer, when it is the one asked for (status `ok`); else the verb fails, as every verb does, its exit
+ * from the status (1 when the host cannot be reached) and the host's sentence (`missing` for a 403 that gives none). */
 export function hostAnswer(r, host, fail, { ok = 200, missing = 'the grant is missing', otherwise } = {}) {
   if (r.status === 0) fail(unreachable(host), 1);
-  if (r.status === 401) fail(notSignedIn(host), 3);
-  if (r.status === 403) fail(sentenceOf(r, missing), 4);
-  if (r.status === 400) fail(sentenceOf(r, 'written wrongly'), 2);
-  if (r.status !== ok) fail(sentenceOf(r, otherwise ?? `the host at ${host} answered ${r.status}`), 1);
+  if (r.status === 401) fail(notSignedIn(host), exitOfRefusal(r.status));
+  const fallback = r.status === 403 ? missing : r.status === 400 ? 'written wrongly' : otherwise ?? `the host at ${host} answered ${r.status}`;
+  if (r.status !== ok) fail(sentenceOf(r, fallback), exitOfRefusal(r.status));
   return r.body;
 }
 
