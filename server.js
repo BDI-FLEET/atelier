@@ -51,7 +51,8 @@ import { WebSocketServer } from 'ws';
 import { getJsx, getJsxBundle, getCss } from './build.js';
 import { resolveModuleChrome, missingChrome } from './chrome-resolve.js';
 import { readModuleJson, sidebarFields } from './module-json.js';
-import { createRouter, bodyOf, headerObject, CALLER_HEADER, MODULE_ID } from './router.js';
+import { createRouter, bodyOf, headerObject, CALLER_HEADER, SHELL_HEADER, MODULE_ID } from './router.js';
+import { BACKEND_LOOP_MS, BACKEND_PING_MS, BACKEND_STOP_MS, BACKEND_RESTART_FIRST_MS, BACKEND_RESTART_MAX_MS, BACKEND_STEADY_MS, SOCKET_HASH_CHARS, PAGE_ICON_CHARS } from './limits.js';
 import {
   loadConfig, loadModuleConfig, shouldIncludeModule, collectConfigPaths, resolvePathEntry,
   CONFIG_FILENAME, resolveRoot,
@@ -152,6 +153,7 @@ let HOST_SIDEBAR = null;   // (req, person) → [{ id, name, icon, origin, works
 // `@atelier/kit` from the chrome. It runs in the page itself, inside the chrome's content area, never in a frame. The
 // files live in one folder, served at /_atelier/pages/<name>.js to anyone (the sign-in page loads before a session).
 let HOST_PAGES = null;     // { paths: Map<path, { title, src }>, signIn: { title, src } | null, dir }
+const PAGE_ICON = new RegExp(`^[a-z0-9-]{1,${PAGE_ICON_CHARS}}$`);
 function loadHostPages(pages, base) {
   const out = { paths: new Map(), signIn: null, dir: null };
   for (const [key, def] of Object.entries(pages || {})) {
@@ -163,7 +165,7 @@ function loadHostPages(pages, base) {
     if (out.dir && out.dir !== dir) throw new Error(`pages: every page file lives in one folder (${out.dir}, not ${dir})`);
     if (!/^[a-z0-9-]+$/.test(name)) throw new Error(`pages: "${key}": a file name is a-z, 0-9 and -`);
     out.dir = dir;
-    if (def.icon !== undefined && (typeof def.icon !== 'string' || !/^[a-z0-9-]{1,40}$/.test(def.icon))) throw new Error(`pages: "${key}": icon is a lucide name (a-z, 0-9, -)`);
+    if (def.icon !== undefined && (typeof def.icon !== 'string' || !PAGE_ICON.test(def.icon))) throw new Error(`pages: "${key}": icon is a lucide name (a-z, 0-9, -)`);
     if (def.sidebar !== undefined && typeof def.sidebar !== 'boolean') throw new Error(`pages: "${key}": sidebar is true or false`);
     // listed in the sidebar unless it says sidebar: false; its icon for the chrome's rail
     const page = { title: def.title, src: `/_atelier/pages/${name}.js`, ...(def.icon ? { icon: def.icon } : {}), ...(def.sidebar === false ? { sidebar: false } : {}) };
@@ -804,9 +806,9 @@ const loadFailed = (qid) => backendErrors.get(qid)?.kind === 'load';
 // its `ctx.broadcast` (IPC) onto the module's real-time topic.
 //
 //   • A crash (an uncaught throw, process.exit, out of memory) ends that process: the shell logs one line, the
-//     module's lane answers 500 with the error, and a fresh process starts after 1 s, 2 s, 4 s … at most 30 s; the
-//     wait goes back to 1 s once a process has stayed up a minute.
-//   • A loop: the shell pings every process every 2 s; one that has not answered for LOOP_MS is killed, then
+//     module's lane answers 500 with the error, and a fresh process starts after BACKEND_RESTART_FIRST_MS, the wait
+//     doubling up to BACKEND_RESTART_MAX_MS; it starts over once a process has stayed up BACKEND_STEADY_MS.
+//   • A loop: the shell pings every process every BACKEND_PING_MS; one that has not answered for LOOP_MS is killed, then
 //     restarted the same way.
 //   • A save restarts that module's process alone: the new code loads in a new process first; if it fails, the old
 //     one keeps serving. If it loads, the old process tears down, then the new one mounts.
@@ -815,7 +817,7 @@ const loadFailed = (qid) => backendErrors.get(qid)?.kind === 'load';
 const backendProcs = new Map();       // qid → { m, b (current process or null), backoff, upSince, restartTimer, gone }
 const mountingBackends = new Map();   // qid → promise of a mount in flight
 const BACKEND_HOST = path.join(HOST_DIR, 'backend-host.js');
-const LOOP_MS = Number(process.env.ATELIER_BACKEND_LOOP_MS || 10000);
+const LOOP_MS = Number(process.env.ATELIER_BACKEND_LOOP_MS || BACKEND_LOOP_MS);
 const SOCK_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'atelier-'));   // 0700: the sockets are the shell's alone
 let sockGen = 0;
 
@@ -828,7 +830,7 @@ function isGateModule(m) {
 // Fork one process for module m and hand it the bundled code. Returns the handle; `wait(types)` resolves with the
 // next message of those types, or { type: 'exit' } if the process ends first.
 function forkBackend(m, code) {
-  const socketPath = path.join(SOCK_DIR, `${crypto.createHash('sha1').update(m.qualifiedId).digest('hex').slice(0, 10)}-${++sockGen}.sock`);
+  const socketPath = path.join(SOCK_DIR, `${crypto.createHash('sha1').update(m.qualifiedId).digest('hex').slice(0, SOCKET_HASH_CHARS)}-${++sockGen}.sock`);
   const child = fork(BACKEND_HOST, [], { stdio: ['ignore', 'inherit', 'inherit', 'ipc'] });
   const b = { m, child, socketPath, alive: true, crashMessage: null, lastPong: Date.now(), stopping: false, loop: false, onExit: null, _wait: null };
   b.wait = (types) => new Promise((res) => { b._wait = { types, res }; });
@@ -880,12 +882,12 @@ function killBackend(b, signal = 'SIGTERM') {
   b.stopping = true;
   try { b.child.kill(signal); } catch {}
 }
-// Ask a process to tear down and wait for it; SIGKILL after 2 s.
+// Ask a process to tear down and wait for it; SIGKILL after BACKEND_STOP_MS.
 function stopBackend(b) {
   if (!b || !b.alive) return Promise.resolve();
   b.stopping = true;
   return new Promise((res) => {
-    const t = setTimeout(() => { try { b.child.kill('SIGKILL'); } catch {} }, 2000);
+    const t = setTimeout(() => { try { b.child.kill('SIGKILL'); } catch {} }, BACKEND_STOP_MS);
     b.child.once('exit', () => { clearTimeout(t); res(); });
     try { b.child.send({ type: 'stop' }); } catch { try { b.child.kill('SIGTERM'); } catch {} }
   });
@@ -906,7 +908,7 @@ function onBackendExit(e, b, r) {
   e.b = null;
   const qid = e.m.qualifiedId;
   const why = b.loop ? `stopped answering for ${Math.round(LOOP_MS / 1000)} s (a loop?) and was killed` : exitWords(b, r);
-  e.backoff = (Date.now() - e.upSince > 60000 || !e.backoff) ? 1000 : Math.min(e.backoff * 2, 30000);
+  e.backoff = (Date.now() - e.upSince > BACKEND_STEADY_MS || !e.backoff) ? BACKEND_RESTART_FIRST_MS : Math.min(e.backoff * 2, BACKEND_RESTART_MAX_MS);
   setBackendError(qid, b.loop ? `This module's backend ${why}.` : enrichBackendError(why, e.m.dir), 'crash');
   console.error(`  ! ${qid}: backend process ended (${b.loop ? 'no answer, killed' : r.signal || `exit ${r.code}`}) · restarting in ${e.backoff / 1000} s · the rest keeps running`);
   clearTimeout(e.restartTimer);
@@ -980,7 +982,7 @@ setInterval(() => {
     if (now - b.lastPong > LOOP_MS) { b.loop = true; try { b.child.kill('SIGKILL'); } catch {} continue; }
     try { b.child.send({ type: 'ping' }); } catch {}
   }
-}, 2000).unref();
+}, BACKEND_PING_MS).unref();
 
 // The module's lane, forwarded to its process. `shell` is what the shell decided about the request (the user the
 // gate resolved, the caller); it rides on a header only the shell sets, on a socket only the shell can open.
@@ -994,7 +996,7 @@ async function proxyToBackend(req, res, e, shell) {
   }
   const headers = { ...req.headers };
   delete headers[CALLER_HEADER];
-  headers['x-atelier-shell'] = Buffer.from(JSON.stringify(shell)).toString('base64');
+  headers[SHELL_HEADER] = Buffer.from(JSON.stringify(shell)).toString('base64');
   // The gate's `authorize` may have read the body already (bodyOf memoizes it): send what it parsed.
   let body = null;
   if (req.__bodyPromise) {

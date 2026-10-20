@@ -17,7 +17,7 @@
  * or outside a module folder · 3 not signed in on that host · 4 the computer is
  * not one you hold a grant on.
  */
-import { resolveHost, askHost, hostAnswer } from './session.js';
+import { resolveHost, askHost, hostAnswer, COMPUTERS_PATH } from './session.js';
 import { DEFAULT_REMOTE, moduleHere, remoteUrl, setRemote } from './repo.js';
 import { failer, sessionAt } from './ops.js';
 import { readArgs, helpOf, HOST } from './args.js';
@@ -44,7 +44,7 @@ if (!mod) fail('not in a module folder: a git repository with a module.json (ate
 
 const host = resolveHost(opts.host);
 const { session } = sessionAt(host, fail);
-const listed = hostAnswer(await askHost(host, 'GET', '/api/computers', { session }), host, fail);
+const listed = hostAnswer(await askHost(host, 'GET', COMPUTERS_PATH, { session }), host, fail);
 const found = (Array.isArray(listed.computers) ? listed.computers : []).find((c) => c && c.label === computer);
 // the same answer for a computer that is not yours and one that does not exist
 if (!found) fail(`the grant is missing: maintain on ${computer}`, 4);

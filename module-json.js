@@ -1,6 +1,6 @@
 // module.json — the declaration every app carries:
 //
-//   name           The name in the sidebar and the title. Up to 64 characters.
+//   name           The name in the sidebar and the title, up to MODULE_NAME_CHARS characters.
 //   icon           An icon name, or an emoji. Drawn by the frame, never imported by the app.
 //   group, color   A heading the sidebar may group under; the app's accent.
 //   primary        A request to land on this app when its place opens.
@@ -15,13 +15,17 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { MODULE_NAME_CHARS, TOOL_NAME_CHARS } from './limits.js';
 
 export const MODULE_JSON = 'module.json';
 /** A tool's name, as the agent sees it: lower case, digits and underscores, up to 64. */
-export const TOOL_NAME = /^[a-z][a-z0-9_]{0,63}$/;
+export const TOOL_NAME = new RegExp(`^[a-z][a-z0-9_]{0,${TOOL_NAME_CHARS - 1}}$`);
+/** The files a module folder runs from besides its module.json. */
+export const BACKEND_FILE = 'backend.js';
+export const FRONTEND_FILE = 'frontend.jsx';
 
 const KINDS = {
-  name: (v) => typeof v === 'string' && v.length > 0 && v.length <= 64,
+  name: (v) => typeof v === 'string' && v.length > 0 && v.length <= MODULE_NAME_CHARS,
   icon: (v) => typeof v === 'string' && v.length > 0,
   group: (v) => typeof v === 'string',
   color: (v) => typeof v === 'string',
@@ -32,7 +36,7 @@ const KINDS = {
     && (v.teaching === undefined || typeof v.teaching === 'string'),
 };
 const SAYS = {
-  name: 'a text of 1 to 64 characters',
+  name: `a text of 1 to ${MODULE_NAME_CHARS} characters`,
   icon: 'an icon name or an emoji',
   group: 'a text',
   color: 'a text',

@@ -25,7 +25,8 @@
  * by line, and its end is the command's end of input. Inside a sandbox the
  * command gets no input and no terminal.
  */
-import { failer, whereOf, runOp, inSandbox } from './ops.js';
+import { failer, whereOf, runOp, inSandbox, INTERRUPTED } from './ops.js';
+import { TERMINAL } from './limits.js';
 import { readArgs, helpOf, REMOTE } from './args.js';
 
 const SPEC = {
@@ -43,7 +44,7 @@ const tty = !inSandbox() && (opts.tty || (!opts.noTty && !!process.stdin.isTTY &
 
 const DETACH = '\x1d';   // Ctrl-]: the way out that is no key of the program's
 const raw = tty && !!process.stdin.isTTY;
-const sizeNow = () => ({ cols: process.stdout.columns || 80, rows: process.stdout.rows || 24 });
+const sizeNow = () => ({ cols: process.stdout.columns || TERMINAL.cols, rows: process.stdout.rows || TERMINAL.rows });
 /* The terminal as it was: raw mode off, the cursor shown, the colours reset (a program cut short may leave them). */
 let given = false;
 const giveBack = () => { if (raw && !given) { given = true; try { process.stdin.setRawMode(false); } catch {} process.stdout.write('\x1b[0m\x1b[?25h'); } };
@@ -68,7 +69,7 @@ const code = await runOp('run', where, { verb: 'run', argv, ...(tty ? { tty: tru
       if (cut > 0) send({ keys: d.slice(0, cut) });
       giveBack();
       process.stderr.write('\nleft · the command\'s terminal on the computer is closed\n');
-      process.exit(130);
+      process.exit(INTERRUPTED);
     });
     process.stdout.on('resize', () => send({ size: sizeNow() }));
     process.stdin.on('end', () => done());

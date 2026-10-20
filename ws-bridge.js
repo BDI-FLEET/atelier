@@ -9,7 +9,12 @@
  * backoff. With `watch` (the page), how the connection is reaches the window as `atelier:connection` events
  * ('online' | 'offline' | 'unauthed'), said after a grace, for the chrome's banner.
  */
+/* How long the connection may be down before the page says it is offline: a reconnect within it goes unseen. */
 const OFFLINE_GRACE_MS = 2500;
+/* The first wait before a reconnect; it doubles with each failure. */
+const RECONNECT_FIRST_MS = 250;
+/* The longest wait between two reconnects. */
+const RECONNECT_MAX_MS = 5000;
 
 export function wireWsBridge({ watch = false } = {}) {
   if (window.__atelier?.subscribe) return;
@@ -17,7 +22,7 @@ export function wireWsBridge({ watch = false } = {}) {
 
   const subscribers = new Map();
   let ws = null;
-  let backoff = 250;
+  let backoff = RECONNECT_FIRST_MS;
   let reconnectTimer = null;
 
   let connState = 'online';
@@ -82,7 +87,7 @@ export function wireWsBridge({ watch = false } = {}) {
       dispatch(frame);
     };
     ws.onopen = () => {
-      backoff = 250;
+      backoff = RECONNECT_FIRST_MS;
       clearOfflineTimer();
       if (watch) setConnState('online');
     };
@@ -96,7 +101,7 @@ export function wireWsBridge({ watch = false } = {}) {
   function scheduleReconnect() {
     clearTimeout(reconnectTimer);
     reconnectTimer = setTimeout(connect, backoff);
-    backoff = Math.min(backoff * 2, 5000);
+    backoff = Math.min(backoff * 2, RECONNECT_MAX_MS);
   }
 
   window.__atelier.subscribe = (topic, handler) => {

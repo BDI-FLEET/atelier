@@ -16,7 +16,7 @@
  * Exit 0 done · 1 the host cannot be reached or refused · 2 written wrongly ·
  * 3 not signed in on that host.
  */
-import { resolveHost, askHost, hostAnswer } from './session.js';
+import { resolveHost, askHost, hostAnswer, COMPUTERS_PATH } from './session.js';
 import { failer, sessionAt } from './ops.js';
 import { readArgs, HOST } from './args.js';
 
@@ -24,7 +24,7 @@ const fail = failer('computers');
 const { opts } = readArgs(process.argv.slice(2), { usage: 'atelier computers [--host <url>]', options: [HOST] }, fail);
 
 const host = resolveHost(opts.host);
-const listed = hostAnswer(await askHost(host, 'GET', '/api/computers', { session: sessionAt(host, fail).session }), host, fail);
+const listed = hostAnswer(await askHost(host, 'GET', COMPUTERS_PATH, { session: sessionAt(host, fail).session }), host, fail);
 
 const list = (Array.isArray(listed.computers) ? listed.computers : []).filter((c) => c && c.label);
 if (!list.length) { console.log('\n  no computers yet\n'); process.exit(0); }

@@ -30,7 +30,8 @@ import os from 'node:os';
 import fs from 'node:fs';
 import { screen, openBrowser, copyText, colourDepth, SCENE_WIDTH } from './login-screen.js';
 import { readCredentials, resolveHost, askHost, sessionFor, keepSession, sentenceOf, unreachable, localTime } from './session.js';
-import { failer } from './ops.js';
+import { failer, INTERRUPTED } from './ops.js';
+import { LOGIN_ASK_MS, LOGIN_CODE_MS, SPINNER_MS } from './limits.js';
 import { readArgs, helpOf, HOST } from './args.js';
 
 const SPEC = {
@@ -91,7 +92,7 @@ async function activate() {
   if (made.status === 0) fail(unreachable(host), 1);
   if (made.status !== 201 || !made.body.code || !made.body.handle) fail(sentenceOf(made, `the host at ${host} made no code (${made.status})`), 1);
   const { code: shown, handle } = made.body;
-  const until = Date.parse(made.body.expires) || Date.now() + 10 * 60_000;
+  const until = Date.parse(made.body.expires) || Date.now() + LOGIN_CODE_MS;
   const link = `${host}/activate?code=${encodeURIComponent(shown)}`;
   // the picture needs its 60 columns: a narrower terminal would wrap every row of it, so it gets the words only
   const art = !plain && !!process.stdout.isTTY && (!process.stdout.columns || process.stdout.columns >= SCENE_WIDTH);
@@ -102,7 +103,7 @@ async function activate() {
   const wait = waiting(art);
   // c copies the link; Ctrl-C ends with one line. Raw mode (needed to read one key) also swallows the terminal's own
   // Ctrl-C, so it is read here as the byte 0x03; SIGINT covers the case without a terminal on stdin.
-  const bye = () => { wait.end('stopped: nothing was signed in'); process.exit(130); };
+  const bye = () => { wait.end('stopped: nothing was signed in'); process.exit(INTERRUPTED); };
   // a refusal ends the waiting line with its sentence (stdout, beside "waiting …"), exit 1 as every verb's refusal
   const refuse = (msg) => { wait.end(msg); process.exit(1); };
   process.on('SIGINT', bye);
@@ -126,8 +127,8 @@ async function activate() {
     }
     if (r.status === 200 && r.body.state === 'spent') refuse('this code was used already; run atelier login again');
     if (r.status !== 0 && r.status !== 200) refuse(sentenceOf(r, `the host at ${host} answered ${r.status}`));
-    if (Date.now() + 2000 > until) refuse('the code expired; run atelier login again');
-    await new Promise((done) => setTimeout(done, 2000));
+    if (Date.now() + LOGIN_ASK_MS > until) refuse('the code expired; run atelier login again');
+    await new Promise((done) => setTimeout(done, LOGIN_ASK_MS));
   }
 }
 
@@ -143,7 +144,7 @@ function waiting(art) {
   let i = 0, note = '';
   const draw = () => process.stdout.write(`\r\x1b[Kwaiting … ${frames[i++ % frames.length]}${note ? `   \x1b[2m${note}\x1b[0m` : ''}`);
   draw();
-  const t = setInterval(draw, 100);
+  const t = setInterval(draw, SPINNER_MS);
   return {
     say: (n) => { note = n; draw(); },
     end: (last) => { clearInterval(t); process.stdout.write(`\r\x1b[Kwaiting … ${last}\n`); },

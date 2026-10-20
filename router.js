@@ -7,13 +7,16 @@
  * `res.json(data, status?)`; a throw answers its `statusCode` (else 500) with `{ error }`.
  */
 
+import { MAX_JSON_BODY } from './limits.js';
+
 /** A module's id, and a workspace's name. */
 export const MODULE_ID = /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/;
 
-export const MAX_JSON_BODY = 10 * 1024 * 1024;
-
 /** The header a host (or a computer) sets with who is calling, as it verified them. */
 export const CALLER_HEADER = 'x-atelier-caller';
+
+/** The header the shell sets on a request it forwards to a backend's process: what it decided about the request. */
+export const SHELL_HEADER = 'x-atelier-shell';
 
 /** A header carrying one JSON object as base64url (or base64): the object, or null when it is not one. */
 export function headerObject(raw) {

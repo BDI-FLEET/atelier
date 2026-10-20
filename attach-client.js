@@ -10,7 +10,7 @@
  * screen is drawn as the host streams it (GET /api/attach/<id>/screen, one
  * JSON frame per line: the pane's lines and cursor, who is here, and who
  * started typing each line), with a one-line footer, and every key
- * is sent (POST /api/attach/<id>/keys, batched every 30 ms). --watch sends no
+ * is sent (POST /api/attach/<id>/keys, batched). --watch sends no
  * keys. Ctrl-] detaches (POST /api/attach/<id>/detach) and puts the terminal
  * back.
  *
@@ -56,10 +56,11 @@
  *
  * Dependency-free: node builtins and global fetch with a streaming body.
  */
-import { resolveHost, askHost, sentenceOf, hostAnswer, unreachable, notSignedIn, normalHost } from './session.js';
+import { resolveHost, askHost, sentenceOf, hostAnswer, unreachable, notSignedIn, normalHost, COMPUTERS_PATH } from './session.js';
 import { DEFAULT_REMOTE, moduleHere, parseRemote, remoteOf } from './repo.js';
 import { failer, sessionAt } from './ops.js';
 import { readArgs, helpOf, HOST } from './args.js';
+import { ATTACH_KEYS_MS, ATTACH_RESIZE_MS, WHEEL_LINES, FOOTER_COLUMNS, TERMINAL } from './limits.js';
 
 /* The two verbs: both write unless --watch. */
 const VERBS = {
@@ -112,7 +113,7 @@ export async function targetFor(typed, host, session, fail) {
   const slash = typed === null ? -1 : typed.indexOf('/');
   const named = typed === null ? '' : slash < 0 ? typed : typed.slice(0, slash);
   const workspace = typed !== null && slash >= 0 ? typed.slice(slash + 1) || 'main' : 'main';
-  const r = await askHost(host, 'GET', '/api/computers', { session });
+  const r = await askHost(host, 'GET', COMPUTERS_PATH, { session });
   if (r.status === 0) fail(unreachable(host), 1);
   if (r.status === 401) fail(notSignedIn(host), 3);
   const list = r.status === 200 && Array.isArray(r.body?.computers) ? r.body.computers.filter((c) => c && c.id && c.label) : null;
@@ -145,8 +146,9 @@ export async function runAttach(onto) {
 
   const out = process.stdout, inp = process.stdin;
   const tty = !!out.isTTY;
+  const columns = () => out.columns || TERMINAL.cols, rows = () => out.rows || TERMINAL.rows;
   /* The size the pane should have: this terminal less the footer's row. None when the output is not a terminal. */
-  const sizeNow = () => tty ? { cols: out.columns || 80, rows: Math.max(1, (out.rows || 24) - 1) } : null;
+  const sizeNow = () => tty ? { cols: columns(), rows: Math.max(1, rows() - 1) } : null;
 
   // 1 · asked: the session, the target, what to be put in front of, and this terminal's size, to the host
   const to = await targetFor(target, host, session, fail);
@@ -155,6 +157,7 @@ export async function runAttach(onto) {
   if (typeof asked.attach !== 'string') fail(`the host at ${host} opened no attach`, 1);
   const { attach: id, computer, workspace } = asked;
   const where = `${computer}/${workspace}`;
+  const attachPath = (what) => `/api/attach/${id}/${what}`;
 
   // ---------- the terminal ----------
 
@@ -205,22 +208,22 @@ export async function runAttach(onto) {
     // on the agent's session your keys share its input with the chat's messages: the footer says you are talking to it
     const mine = watch ? ' · watch' : onto === 'agent' ? ' · typing to the agent' : '';
     const text = ` attached · ${where} · also here: ${others()}${mine}${up} · Ctrl-] to detach${note ? ` · ${note}` : ''} `;
-    return `\x1b[7m${clip(text, (out.columns || 80)).padEnd(Math.min(out.columns || 80, 200))}\x1b[0m`;
+    return `\x1b[7m${clip(text, columns()).padEnd(Math.min(columns(), FOOTER_COLUMNS))}\x1b[0m`;
   };
   /* The lines that fit (the part with the cursor in it; a scrolled view from its top), the footer, then the cursor where
    * the pane has it (hidden while scrolled back). One synchronized update, so a terminal that knows it shows the frame at
    * once, never half drawn; `whole` clears the screen first (after a resize the terminal may have moved what it showed). */
   function draw(f, whole = false) {
     if (f) last = f;
-    const rows = out.rows || 24, cols = out.columns || 80, room = Math.max(1, rows - 1);
+    const height = rows(), cols = columns(), room = Math.max(1, height - 1);
     let s = `${tty ? '\x1b[?2026h' : ''}\x1b[?25l${whole ? '\x1b[2J' : ''}\x1b[H`;
     if (last) {
       const { lines, cursor } = markedLines(last, id, entry.person?.id);
       const top = last.scrolled ? 0 : cursor.y >= room ? cursor.y - room + 1 : 0;
       for (let i = 0; i < room; i++) s += `\x1b[${i + 1};1H${clip(lines[top + i] ?? '', cols)}\x1b[K`;
-      s += `\x1b[${rows};1H${footer()}`;
+      s += `\x1b[${height};1H${footer()}`;
       if (!last.scrolled) s += `\x1b[${cursor.y - top + 1};${Math.min(cursor.x, cols - 1) + 1}H\x1b[?25h`;
-    } else s += `\x1b[${rows};1H${footer()}\x1b[?25h`;
+    } else s += `\x1b[${height};1H${footer()}\x1b[?25h`;
     out.write(s + (tty ? '\x1b[?2026l' : '\n'));
   }
 
@@ -234,8 +237,8 @@ export async function runAttach(onto) {
     timer = null;
     const keys = pending, scroll = scrollBy;
     pending = ''; scrollBy = 0;
-    if (keys) sending = sending.then(() => askHost(host, 'POST', `/api/attach/${id}/keys`, { body: { keys }, session })).catch(() => {});
-    if (scroll) sending = sending.then(() => askHost(host, 'POST', `/api/attach/${id}/view`, { body: { scroll }, session })).catch(() => {});
+    if (keys) sending = sending.then(() => askHost(host, 'POST', attachPath('keys'), { body: { keys }, session })).catch(() => {});
+    if (scroll) sending = sending.then(() => askHost(host, 'POST', attachPath('view'), { body: { scroll }, session })).catch(() => {});
     return sending;
   };
 
@@ -245,14 +248,14 @@ export async function runAttach(onto) {
   if (tty) out.on('resize', () => {
     draw(null, true);
     clearTimeout(resized);
-    resized = setTimeout(() => { sending = sending.then(() => askHost(host, 'POST', `/api/attach/${id}/view`, { body: { size: sizeNow() }, session })).catch(() => {}); }, 80);
+    resized = setTimeout(() => { sending = sending.then(() => askHost(host, 'POST', attachPath('view'), { body: { size: sizeNow() }, session })).catch(() => {}); }, ATTACH_RESIZE_MS);
   });
 
   /* What the terminal sent, less the view's own gestures: the wheel (SGR mouse reports; a click is dropped, never sent to
-   * the pane) and Shift-PageUp / Shift-PageDown scroll this view, three rows a notch, a screen less one a page. */
-  const page = () => Math.max(1, (out.rows || 24) - 2);
+   * the pane) and Shift-PageUp / Shift-PageDown scroll this view, WHEEL_LINES rows a notch, a screen less one a page. */
+  const page = () => Math.max(1, rows() - 2);
   const gestures = (s) => s
-    .replace(/\x1b\[<(\d+);\d+;\d+[Mm]/g, (_, b) => { const n = Number(b); if (n & 64) scrollBy += (n & 3) === 0 ? 3 : (n & 3) === 1 ? -3 : 0; return ''; })
+    .replace(/\x1b\[<(\d+);\d+;\d+[Mm]/g, (_, b) => { const n = Number(b); if (n & 64) scrollBy += (n & 3) === 0 ? WHEEL_LINES : (n & 3) === 1 ? -WHEEL_LINES : 0; return ''; })
     .replace(/\x1b\[5;2~/g, () => { scrollBy += page(); return ''; })
     .replace(/\x1b\[6;2~/g, () => { scrollBy -= page(); return ''; });
 
@@ -263,7 +266,7 @@ export async function runAttach(onto) {
     leaving = true;
     if (timer) clearTimeout(timer);
     await flush();
-    const d = await askHost(host, 'POST', `/api/attach/${id}/detach`, { session });
+    const d = await askHost(host, 'POST', attachPath('detach'), { session });
     stream.abort();
     restore();
     console.log(`\n  detached · the workspace keeps running${afterDetach(d.body.handover)}\n`);
@@ -286,7 +289,7 @@ export async function runAttach(onto) {
     const at = s.indexOf('\x1d');   // Ctrl-]
     const keys = safe(gestures(at >= 0 ? s.slice(0, at) : s));
     if (keys && !watch) pending += keys;
-    if ((pending || scrollBy) && !timer) timer = setTimeout(flush, 30);
+    if ((pending || scrollBy) && !timer) timer = setTimeout(flush, ATTACH_KEYS_MS);
     if (at >= 0) void detach(0);
   });
   process.on('SIGTERM', () => void detach(0));
@@ -297,7 +300,7 @@ export async function runAttach(onto) {
   draw();
   let res;
   try {
-    res = await fetch(`${host}/api/attach/${id}/screen`, { headers: { authorization: `Session ${session}` }, signal: stream.signal });
+    res = await fetch(`${host}${attachPath('screen')}`, { headers: { authorization: `Session ${session}` }, signal: stream.signal });
   } catch {
     restore(); fail(unreachable(host), 1);
   }

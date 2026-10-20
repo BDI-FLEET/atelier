@@ -38,13 +38,14 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { resolveHost, askHost, hostAnswer } from './session.js';
+import { resolveHost, askHost, hostAnswer, COMPUTERS_PATH } from './session.js';
 import { inSandbox } from './sandbox.js';
 import { DEFAULT_REMOTE, GITIGNORE, git, gitToken, gitWithToken, remoteUrl, setRemote } from './repo.js';
 import { failer, sessionAt } from './ops.js';
 import { readArgs, helpOf, HOST } from './args.js';
+import { REMOTE_WORD_CHARS, SHORT_SHA_CHARS } from './limits.js';
 
-const LABEL = /^[A-Za-z0-9_.-]{1,80}$/;
+const LABEL = new RegExp(`^[A-Za-z0-9_.-]{1,${REMOTE_WORD_CHARS}}$`);
 const SPEC = {
   usage: 'atelier clone <app> [folder] [--computer <label>] [--host <url>]',
   words: [['<app>', 'an app you may push (atelier computers lists them)'], ['folder', "where its code goes (default: the app's name)"]],
@@ -70,7 +71,7 @@ const { session } = sessionAt(host, fail);
 
 // 1 · the computer the app runs on, among yours
 const missing = `the grant is missing: maintain on ${app}`;
-const listed = hostAnswer(await askHost(host, 'GET', '/api/computers', { session }), host, fail, { missing });
+const listed = hostAnswer(await askHost(host, 'GET', COMPUTERS_PATH, { session }), host, fail, { missing });
 const runs = (c) => Array.isArray(c?.modules) && c.modules.some((m) => m && m.label === app);
 let found = (Array.isArray(listed.computers) ? listed.computers : []).filter((c) => c && typeof c.label === 'string' && (!opts.computer || c.label === opts.computer) && runs(c));
 // two of yours run an app of that name: the one you maintain, else name it (the host decides the right, not this list)
@@ -92,5 +93,5 @@ if (code !== 0) fail(`git could not clone ${app}`, 1);
 // 4 · the remote atelier as `atelier remote` sets it: the host you signed in at, the computer, the app
 if (!setRemote(dir, DEFAULT_REMOTE, remoteUrl(host, computer, app))) fail(`git could not set the remote "${DEFAULT_REMOTE}"`, 1);
 if (!fs.existsSync(path.join(dir, '.gitignore'))) fs.writeFileSync(path.join(dir, '.gitignore'), GITIGNORE);
-const short = git(dir, ['rev-parse', '--short=7', 'HEAD']).out || 'no commit yet';
+const short = git(dir, ['rev-parse', `--short=${SHORT_SHA_CHARS}`, 'HEAD']).out || 'no commit yet';
 console.log(`cloned ${app} at ${short} · remote ${DEFAULT_REMOTE} → ${computer}`);

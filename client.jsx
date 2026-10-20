@@ -27,6 +27,11 @@ import { wireWsBridge } from './ws-bridge.js';
 
 const { useState, useEffect, useRef } = React;
 
+/* The longest title a frame may give its page. */
+const FRAME_TITLE_CHARS = 200;
+/* The lowest a frame is drawn, however little room the window leaves it. */
+const FRAME_MIN_HEIGHT = 240;
+
 // What a chrome's `loadedModules` reads: modules run in their frames, so the page loads no module bundle.
 const NO_MODULE_BUNDLES = Object.freeze({});
 
@@ -278,7 +283,7 @@ function ModuleFrame({ qid, origin, route, title, onTitle }) {
           window.dispatchEvent(new CustomEvent('atelier:route'));
         }
       } else if (d.atelier === 'title' && typeof d.title === 'string') {
-        onTitle?.(d.title.slice(0, 200));
+        onTitle?.(d.title.slice(0, FRAME_TITLE_CHARS));
       } else if (d.atelier === 'key' && (d.key === 'Escape' || d.key === 'k' || d.key === 'K')) {
         // Handed to this page as if pressed here: the chrome's ⌘K palette, a dialog's Esc.
         document.dispatchEvent(new KeyboardEvent('keydown', {
@@ -325,7 +330,7 @@ function ModuleFrame({ qid, origin, route, title, onTitle }) {
         below += parseFloat(cs.paddingBottom) + parseFloat(cs.borderBottomWidth);
       }
       const top = el.getBoundingClientRect().top + window.scrollY;
-      setHeight(Math.max(240, Math.floor(window.innerHeight - top - below)));
+      setHeight(Math.max(FRAME_MIN_HEIGHT, Math.floor(window.innerHeight - top - below)));
     };
     measure();
     window.addEventListener('resize', measure);

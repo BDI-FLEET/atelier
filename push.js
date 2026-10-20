@@ -47,6 +47,7 @@ import { inSandbox, askSocket } from './sandbox.js';
 import { DEFAULT_REMOTE, git, gitToken, gitWithToken } from './repo.js';
 import { failer, sessionAt, socketAnswer, whereOf } from './ops.js';
 import { readArgs } from './args.js';
+import { PUSH_QUIET_MS, SHORT_SHA_CHARS } from './limits.js';
 
 const SPEC = {
   usage: 'atelier push [remote] [commit]',
@@ -77,8 +78,8 @@ function verdict(code, said) {
     process.exit(0);
   }
   // the commit is the receiver's main already: git said so, and only an accepted push moves it
-  if (code === 0 && !remoteLines.length && /Everything up-to-date/.test(said)) { console.log(`${module} @ ${sha.slice(0, 7)} is live already`); process.exit(0); }
-  if (code === 0) fail(`the receiver did not say ${module} is live on ${sha.slice(0, 7)}`, 1);
+  if (code === 0 && !remoteLines.length && /Everything up-to-date/.test(said)) { console.log(`${module} @ ${sha.slice(0, SHORT_SHA_CHARS)} is live already`); process.exit(0); }
+  if (code === 0) fail(`the receiver did not say ${module} is live on ${sha.slice(0, SHORT_SHA_CHARS)}`, 1);
   process.exit(1);
 }
 
@@ -86,7 +87,7 @@ if (inSandbox()) {
   // inside a sandbox: no session, no token. The computer pushes from this checkout with a token the host hands to it
   // alone, and streams git's lines back; they are printed as git prints them
   let said = '';
-  const a = await askSocket({ verb: 'push', module, remote, commit: sha }, { timeoutMs: 180_000,
+  const a = await askSocket({ verb: 'push', module, remote, commit: sha }, { timeoutMs: PUSH_QUIET_MS,
     onLine: (line) => { process.stderr.write(`${line}\n`); said += `${line}\n`; } });
   verdict(socketAnswer(a, fail, 'push'), said);
 }

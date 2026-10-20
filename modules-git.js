@@ -18,6 +18,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
+import { MODULE_JSON } from './module-json.js';
 
 const git = (args, cwd) => {
   const r = spawnSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
@@ -30,7 +31,7 @@ export function addModule(root, url) {
   const tmp = path.join(root, `.atelier-add-${randomBytes(3).toString('hex')}`);
   const c = git(['clone', '-q', url, tmp], root);
   if (c.code !== 0) { fs.rmSync(tmp, { recursive: true, force: true }); return null; }   // the collection form says why
-  if (!fs.existsSync(path.join(tmp, 'module.json'))) { fs.rmSync(tmp, { recursive: true, force: true }); return null; }
+  if (!fs.existsSync(path.join(tmp, MODULE_JSON))) { fs.rmSync(tmp, { recursive: true, force: true }); return null; }
   const name = path.basename(url.replace(/[/\\]+$/, '')).replace(/\.git$/, '').replace(/\.bundle$/, '');
   if (!NAME.test(name)) { fs.rmSync(tmp, { recursive: true, force: true }); console.error(`\natelier add: "${name}" is not a folder name for a module\n`); return { code: 2 }; }
   const dest = path.join(root, name);
@@ -44,7 +45,7 @@ export function addModule(root, url) {
 function clones(root) {
   let es = [];
   try { es = fs.readdirSync(root, { withFileTypes: true }); } catch { return []; }
-  return es.filter((e) => e.isDirectory() && NAME.test(e.name) && fs.existsSync(path.join(root, e.name, '.git')) && fs.existsSync(path.join(root, e.name, 'module.json'))
+  return es.filter((e) => e.isDirectory() && NAME.test(e.name) && fs.existsSync(path.join(root, e.name, '.git')) && fs.existsSync(path.join(root, e.name, MODULE_JSON))
     && git(['remote'], path.join(root, e.name)).out !== '').map((e) => e.name).sort();
 }
 

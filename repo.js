@@ -18,6 +18,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { normalHost, askHost, hostAnswer } from './session.js';
+import { MODULE_JSON } from './module-json.js';
+import { APP_LABEL_CHARS } from './limits.js';
 
 export const DEFAULT_REMOTE = 'atelier';
 
@@ -26,7 +28,7 @@ export const GITIGNORE = 'data/\nnode_modules/\n';
 
 /* The host's label for an app, with the folder's name in its place when module.json gives no name. */
 export function appLabel(name, fallback = '') {
-  const l = String(name ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).replace(/-+$/, '');
+  const l = String(name ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, APP_LABEL_CHARS).replace(/-+$/, '');
   return l || String(fallback).toLowerCase();
 }
 
@@ -42,7 +44,7 @@ export function moduleHere(cwd = process.cwd()) {
   if (top.code !== 0 || !top.out) return null;
   const dir = top.out;
   let declared;
-  try { declared = JSON.parse(fs.readFileSync(path.join(dir, 'module.json'), 'utf8')); } catch { return null; }
+  try { declared = JSON.parse(fs.readFileSync(path.join(dir, MODULE_JSON), 'utf8')); } catch { return null; }
   const name = declared && typeof declared.name === 'string' ? declared.name : '';
   return { dir, name: appLabel(name, path.basename(dir)) };
 }

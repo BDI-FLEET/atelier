@@ -28,6 +28,7 @@ import { readCredentials, askHost, sessionFor, sentenceOf, notSignedIn, unreacha
 import { inSandbox, askSocket } from './sandbox.js';
 import { DEFAULT_REMOTE, moduleHere, parseRemote, remoteOf } from './repo.js';
 import { readArgs, REMOTE } from './args.js';
+import { OP_QUIET_MS, OP_FOLLOW_MS, MACHINE_NAME_CHARS } from './limits.js';
 
 export { inSandbox };
 
@@ -77,7 +78,7 @@ export async function runOp(name, target, op, { during, socket, onFrame = printF
   if (inSandbox()) {
     const a = await askSocket({ verb: 'op', ...(target.computer ? { computer: target.computer } : {}), ...(target.module ? { module: target.module } : {}),
       ...(target.workspace ? { workspace: target.workspace } : {}), op, ...(socket || {}) },
-      { timeoutMs: follow ? 24 * 3_600_000 : 15 * 60_000, onFrame });
+      { timeoutMs: follow ? OP_FOLLOW_MS : OP_QUIET_MS, onFrame });
     return socketAnswer(a, fail, 'op');
   }
   const { session } = sessionAt(target.host, fail);
@@ -92,7 +93,7 @@ export async function runOp(name, target, op, { during, socket, onFrame = printF
     return x.body;
   };
   const ac = new AbortController();
-  for (const sig of ['SIGINT', 'SIGTERM']) process.once(sig, () => { ac.abort(); process.exit(130); });
+  for (const sig of ['SIGINT', 'SIGTERM']) process.once(sig, () => { ac.abort(); process.exit(INTERRUPTED); });
   let res;
   try { res = await fetch(`${target.host}/api/ops/${id}/stream`, { headers: { authorization: `Session ${session}`, accept: 'application/x-ndjson' }, signal: ac.signal }); }
   catch { fail(unreachable(target.host), 1); }
@@ -122,13 +123,13 @@ export async function runOp(name, target, op, { during, socket, onFrame = printF
 }
 
 /* How the host's record names this machine ("from <name>"): ATELIER_MACHINE, else this machine's hostname. */
-export const machineName = () => (process.env.ATELIER_MACHINE || os.hostname() || 'a machine').slice(0, 64);
-
-/* How many bytes go in one piece when data or files move between here and a computer. */
-export const PIECE = 256 * 1024;
+export const machineName = () => (process.env.ATELIER_MACHINE || os.hostname() || 'a machine').slice(0, MACHINE_NAME_CHARS);
 
 /* A size in words: 812 B, 48.2 kB, 1.8 GB. */
 export const sizeWords = (b) => b < 1000 ? `${b} B` : b < 1e6 ? `${(b / 1e3).toFixed(1)} kB` : b < 1e9 ? `${(b / 1e6).toFixed(1)} MB` : `${(b / 1e9).toFixed(1)} GB`;
+
+/* The exit of a verb stopped by Ctrl-C, as a shell reports one ended by SIGINT. */
+export const INTERRUPTED = 130;
 
 /* The exit code from an op's code: 0 done, 2 written wrongly, anything else 1. */
 export const exitOf = (code) => (code === 0 ? 0 : code === 2 ? 2 : 1);

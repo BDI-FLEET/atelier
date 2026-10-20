@@ -15,17 +15,21 @@
  *
  * Which host: there is one default host, and --host signs in to another one:
  * --host <url> for that call, else ATELIER_HOST (how a machine names its
- * default host), else http://127.0.0.1:4350 (the default host in dev).
+ * default host), else DEFAULT_HOST (the default host in dev).
  * Signing in somewhere else never moves the default.
  *
- * Kept dependency-free (node builtins + global fetch) and separate from the
+ * Kept free of packages (node builtins, global fetch and limits.js) and apart from the
  * server: nothing here runs in the serving process.
  */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { DEV_HOST_PORT } from './limits.js';
 
-export const DEFAULT_HOST = 'http://127.0.0.1:4350';
+export const DEFAULT_HOST = `http://127.0.0.1:${DEV_HOST_PORT}`;
+
+/* The host's list of the computers a person is in. */
+export const COMPUTERS_PATH = '/api/computers';
 
 const home = () => process.env.HOME || os.homedir();
 const configHome = () => (path.isAbsolute(process.env.XDG_CONFIG_HOME || '') ? process.env.XDG_CONFIG_HOME : path.join(home(), '.config'));

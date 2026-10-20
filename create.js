@@ -24,9 +24,10 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { readCredentials, resolveHost, askHost, sessionFor, unreachable } from './session.js';
+import { readCredentials, resolveHost, askHost, sessionFor, unreachable, COMPUTERS_PATH } from './session.js';
 import { DEFAULT_REMOTE, GITIGNORE, appLabel, git, remoteUrl, setRemote } from './repo.js';
 import { failer } from './ops.js';
+import { MODULE_JSON, BACKEND_FILE, FRONTEND_FILE } from './module-json.js';
 import { readArgs, helpOf, HOST } from './args.js';
 
 const SPEC = {
@@ -52,13 +53,13 @@ if (given) {
 const added = [];
 const write = (file, text) => { fs.writeFileSync(path.join(dir, file), text); added.push(file); };
 const put = (file, text) => { if (!fs.existsSync(path.join(dir, file))) write(file, text); };
-put('module.json', JSON.stringify({ name }, null, 2) + '\n');
-if (!fs.existsSync(path.join(dir, 'frontend.jsx')) && !fs.existsSync(path.join(dir, 'backend.js'))) {
-  write('frontend.jsx', `export default function Module() {
+put(MODULE_JSON, JSON.stringify({ name }, null, 2) + '\n');
+if (!fs.existsSync(path.join(dir, FRONTEND_FILE)) && !fs.existsSync(path.join(dir, BACKEND_FILE))) {
+  write(FRONTEND_FILE, `export default function Module() {
   return <div className="p-8 text-xl">hello from ${name}</div>
 }
 `);
-  write('backend.js', `// routes mount at /api/<workspace>/${label}
+  write(BACKEND_FILE, `// routes mount at /api/<workspace>/${label}
 export default {
   mountRoutes(router, ctx) {
     router.get('/ping', (req, res) => res.json({ ok: true, from: ctx.qualifiedId }))
@@ -89,7 +90,7 @@ const host = resolveHost(opts.host);
 const entry = sessionFor(readCredentials(), host);
 const later = `project ${name} · not signed in: run atelier login, then atelier remote <computer>`;
 if (!entry) { console.log(later); process.exit(0); }
-const r = await askHost(host, 'GET', '/api/computers', { session: entry.session });
+const r = await askHost(host, 'GET', COMPUTERS_PATH, { session: entry.session });
 if (r.status === 401) { console.log(later); process.exit(0); }
 if (r.status === 0) { console.log(`project ${name} · ${unreachable(host)}: atelier remote <computer> later`); process.exit(0); }
 const own = r.status === 200 && Array.isArray(r.body.computers) ? r.body.computers.find((c) => c && c.kind === 'own' && c.label) : null;

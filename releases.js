@@ -24,6 +24,7 @@
 import { askHost, hostAnswer, localTime } from './session.js';
 import { DEFAULT_REMOTE } from './repo.js';
 import { failer, sessionAt, whereOf } from './ops.js';
+import { SHORT_SHA_CHARS } from './limits.js';
 import { readArgs, REMOTE } from './args.js';
 
 const fail = failer('releases');
@@ -41,7 +42,7 @@ const list = (Array.isArray(answer.releases) ? answer.releases : []).filter((x) 
 if (!list.length) { console.log(`\n  ${module} on ${computer}: nothing pushed yet\n`); process.exit(0); }
 console.log('');
 for (const x of list) {
-  if (typeof x.op === 'string') console.log(`  ${(x.commit ? String(x.commit).slice(0, 7) : '').padEnd(7)} · ${localTime(x.at)} · ${x.what || x.op} · by ${x.by ?? '?'}${x.from ? ` · from ${x.from}` : ''}`);
-  else console.log(`  ${String(x.commit).slice(0, 7)} · ${localTime(x.at)} · by ${x.by ?? '?'}${x.from ? ` · from ${x.from}` : ''}${x.live ? ' · live' : ''}`);
+  if (typeof x.op === 'string') console.log(`  ${(x.commit ? String(x.commit).slice(0, SHORT_SHA_CHARS) : '').padEnd(SHORT_SHA_CHARS)} · ${localTime(x.at)} · ${x.what || x.op} · by ${x.by ?? '?'}${x.from ? ` · from ${x.from}` : ''}`);
+  else console.log(`  ${String(x.commit).slice(0, SHORT_SHA_CHARS)} · ${localTime(x.at)} · by ${x.by ?? '?'}${x.from ? ` · from ${x.from}` : ''}${x.live ? ' · live' : ''}`);
 }
 console.log('');

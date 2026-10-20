@@ -16,6 +16,7 @@
 import { resolveHost, askHost, hostAnswer } from './session.js';
 import { failer, sessionAt } from './ops.js';
 import { readArgs, HOST } from './args.js';
+import { ISO_MINUTE_CHARS, TOKEN_SHOWN_CHARS } from './limits.js';
 
 const fail = failer('whoami');
 const { opts: { grants, sessions, host: flagHost } } = readArgs(process.argv.slice(2), {
@@ -36,7 +37,7 @@ if (grants) {
 if (sessions) {
   const all = Array.isArray(me.sessions) ? me.sessions : [];
   console.log(`  signed in on ${all.length} ${all.length === 1 ? 'machine' : 'machines'}:`);
-  const until = (e) => e ? `until ${String(e).slice(0, 16).replace('T', ' ')} UTC` : 'no end';
+  const until = (e) => e ? `until ${String(e).slice(0, ISO_MINUTE_CHARS).replace('T', ' ')} UTC` : 'no end';
   for (const s of [...all].sort((a, b) => (b.this === true) - (a.this === true))) console.log(`    ${s.this ? 'this machine' : 'another machine'} · ${until(s.expires)}`);
 }
 console.log('');
@@ -48,7 +49,7 @@ function inWords(line) {
   const [, kind, token, relation] = m, object = `${kind}:${token}`;
   switch (relation) {
     case 'member': return `a member of ${object}`;
-    case 'of': return `signed in on a machine (a session, ${token.slice(0, 8)}…)`;
+    case 'of': return `signed in on a machine (a session, ${token.slice(0, TOKEN_SHOWN_CHARS)}…)`;
     case 'watch': return `may watch ${object}`;
     case 'read': return `may read ${object}`;
     case 'write': return `may write ${object}`;

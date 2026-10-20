@@ -47,6 +47,7 @@
     "backend-host.js",
     "module-serve.js",
     "router.js",
+    "limits.js",
     "frame.jsx",
     "ws-bridge.js",
     "module-json.js",

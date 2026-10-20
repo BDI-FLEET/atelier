@@ -17,17 +17,18 @@
  */
 import { failer, whereOf, runOp, exitOf } from './ops.js';
 import { readArgs, helpOf, REMOTE } from './args.js';
+import { CONFIG_KEY_CHARS, CONFIG_VALUE_CHARS } from './limits.js';
 
 const SPEC = {
   usage: 'atelier config [set KEY=value… | unset KEY…] [-r remote]',
-  words: [['KEY', 'A-Z, digits and _ (CRM_MAIL_HOST); a value at most 4096 characters']],
+  words: [['KEY', `A-Z, digits and _ (CRM_MAIL_HOST); a value at most ${CONFIG_VALUE_CHARS} characters`]],
   options: [REMOTE],
   most: Infinity,
 };
 const USAGE = helpOf(SPEC);
 const fail = failer('config');
 const { opts, words: args } = readArgs(process.argv.slice(2), SPEC, fail);
-const KEY = /^[A-Z_][A-Z0-9_]{0,63}$/;
+const KEY = new RegExp(`^[A-Z_][A-Z0-9_]{0,${CONFIG_KEY_CHARS - 1}}$`);
 let set = [], unset = [];
 const values = {};
 if (args[0] === 'set') {

@@ -6,6 +6,7 @@
  * its long spelling: `--no-browser` → opts.noBrowser.
  */
 import { DEFAULT_HOST } from './session.js';
+import { HELP_COLUMN } from './limits.js';
 
 export const HOST = {
   flag: '--host', value: 'url', help: `another host, for this call (default: ATELIER_HOST, else ${DEFAULT_HOST})`,
@@ -20,7 +21,7 @@ const nameOf = (o) => [o.also, o.flag].find((f) => f?.startsWith('--'))?.slice(2
 /* The help: the usage lines, then one line per word (`words`: [name, help]) and per option, the helps in one column. */
 export function helpOf({ usage, words = [], options = [] }) {
   const rows = [...words, ...options.map((o) => [`${o.flag}${o.value ? ` <${o.value}>` : ''}`, o.help])];
-  const width = Math.max(18, ...rows.map(([l]) => l.length));
+  const width = Math.max(HELP_COLUMN, ...rows.map(([l]) => l.length));
   const indent = '\n' + ' '.repeat(width + 4);
   return [`usage: ${usage}`, ...rows.map(([l, h]) => `  ${l.padEnd(width)}  ${h.split('\n').join(indent)}`)].join('\n');
 }

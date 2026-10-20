@@ -29,7 +29,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { failer, runOp, exitOf, inSandbox, PIECE, sizeWords } from './ops.js';
+import { failer, runOp, exitOf, inSandbox, sizeWords } from './ops.js';
+import { PIECE, FILES_PER_ASK, FILE_TRIES, MISSING_NAMED } from './limits.js';
 import { resolveHost } from './session.js';
 import { readArgs, helpOf, HOST } from './args.js';
 
@@ -96,8 +97,8 @@ async function push(list, label = 'files') {
   const code = await runOp('files', { host, computer }, { verb: 'files-push', path: remotePath }, {
     during: async (into) => {
       const need = new Map();
-      for (let i = 0; i < list.length; i += 500) {
-        const a = await into({ have: list.slice(i, i + 500).map(({ path, size, sha256 }) => ({ path, size, sha256 })) });
+      for (let i = 0; i < list.length; i += FILES_PER_ASK) {
+        const a = await into({ have: list.slice(i, i + FILES_PER_ASK).map(({ path, size, sha256 }) => ({ path, size, sha256 })) });
         if (!Array.isArray(a.need)) throw new Error(a.refused || 'the computer did not say what it lacks');
         for (const n of a.need) need.set(n.sha256, n.from);
       }
@@ -118,9 +119,9 @@ async function push(list, label = 'files') {
         } finally { fs.closeSync(fd); }
       }
       const placing = list.filter((f) => need.has(f.sha256));
-      for (let i = 0; i < placing.length; i += 500) {
-        const p = await into({ place: placing.slice(i, i + 500).map(({ path, size, sha256 }) => ({ path, size, sha256 })) });
-        if (Array.isArray(p.missing) && p.missing.length) throw new Error(`not placed: ${p.missing.slice(0, 3).join(', ')}`);
+      for (let i = 0; i < placing.length; i += FILES_PER_ASK) {
+        const p = await into({ place: placing.slice(i, i + FILES_PER_ASK).map(({ path, size, sha256 }) => ({ path, size, sha256 })) });
+        if (Array.isArray(p.missing) && p.missing.length) throw new Error(`not placed: ${p.missing.slice(0, MISSING_NAMED).join(', ')}`);
       }
       await into({ end: true });
     },
@@ -147,7 +148,7 @@ async function fetchFile(into, f, dest) {
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   let at = fs.existsSync(part) ? fs.statSync(part).size : 0;
   if (at > f.size) { fs.rmSync(part); at = 0; }
-  for (let tries = 0; tries < 2; tries++) {
+  for (let tries = 0; tries < FILE_TRIES; tries++) {
     while (at < f.size) {
       const p = await into({ get: f.path, at });
       if (typeof p.data !== 'string') throw new Error(p.refused || `${f.path} did not come`);

@@ -24,7 +24,9 @@ import fs from 'node:fs';
 import { failer, runOp, exitOf, inSandbox } from './ops.js';
 import { resolveHost } from './session.js';
 import { readArgs, helpOf, HOST } from './args.js';
+import { AGENT_NAME_CHARS } from './limits.js';
 
+const AGENT_NAME = new RegExp(`^[a-z][a-z0-9-]{0,${AGENT_NAME_CHARS - 1}}$`);
 const SPEC = {
   usage: 'atelier agent [computer][/workspace]\n       atelier agent new <name> [--prompt file] [computer][/workspace]\n'
     + '       atelier agent primary <name> [computer][/workspace]\n       atelier agent attach [computer][/workspace] [--watch]',
@@ -36,7 +38,7 @@ const argv = process.argv.slice(2);
 const sub = argv[0] === 'new' || argv[0] === 'primary' ? argv.shift() : 'list';
 const { opts, words } = readArgs(argv, { ...SPEC, sub, most: sub === 'list' ? 1 : 2 }, fail);
 const name = sub === 'list' ? null : words.shift();
-if (sub !== 'list' && (!name || !/^[a-z][a-z0-9-]{0,31}$/.test(name))) fail(`agent ${sub} <name>: lower-case letters, digits and dashes\n\n${USAGE}`);
+if (sub !== 'list' && (!name || !AGENT_NAME.test(name))) fail(`agent ${sub} <name>: lower-case letters, digits and dashes\n\n${USAGE}`);
 const [target = null] = words;
 let prompt = null;
 if (opts.prompt) { try { prompt = fs.readFileSync(opts.prompt, 'utf8'); } catch { fail(`cannot read ${opts.prompt}`); } }

@@ -9,6 +9,7 @@
  *   openBrowser(url) / copyText(text)                             best effort; never throw
  */
 import { spawn, spawnSync } from 'node:child_process';
+import { OPENER_MS } from './limits.js';
 
 /* The scene, one letter per pixel. Two pixel rows share one terminal row
  * (the upper half block ▀ in the top pixel's colour on the bottom pixel's
@@ -134,7 +135,7 @@ export function copyText(text, { platform = process.platform } = {}) {
     : [['wl-copy', []], ['xclip', ['-selection', 'clipboard']]];
   for (const [cmd, args] of tries) {
     try {
-      const r = spawnSync(cmd, args, { input: text, stdio: ['pipe', 'ignore', 'ignore'], timeout: 2000 });
+      const r = spawnSync(cmd, args, { input: text, stdio: ['pipe', 'ignore', 'ignore'], timeout: OPENER_MS });
       if (!r.error && r.status === 0) return true;
     } catch {}
   }

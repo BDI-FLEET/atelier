@@ -11,7 +11,8 @@
 
 import http from 'node:http';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { createRouter, headerObject } from './router.js';
+import { createRouter, headerObject, SHELL_HEADER } from './router.js';
+import { MAX_HEADER_BYTES, CRASH_REPORT_MS, STOP_FLUSH_MS } from './limits.js';
 
 const callerStore = new AsyncLocalStorage();
 let info = null;          // { id, workspace, qualifiedId, dir, label, port, host, baseUrl, socketPath }
@@ -27,8 +28,8 @@ const router = createRouter();
 async function handle(req, res) {
   // What the shell decided about this request rides on one header only the shell can set: this socket is private to
   // it. It is taken off before the module sees the request.
-  const shell = headerObject(req.headers['x-atelier-shell']) ?? {};
-  delete req.headers['x-atelier-shell'];
+  const shell = headerObject(req.headers[SHELL_HEADER]) ?? {};
+  delete req.headers[SHELL_HEADER];
   const caller = shell.caller ?? null;
   req.user = shell.user ?? null;
   req.caller = caller;
@@ -65,7 +66,7 @@ function die(kind, err) {
   if (stopping) return;
   stopping = true;
   const message = `${kind} in this module's backend, so its process ended:\n${(err && err.stack) || String(err)}`;
-  const t = setTimeout(() => process.exit(1), 500);
+  const t = setTimeout(() => process.exit(1), CRASH_REPORT_MS);
   send({ type: 'crash', message }, () => { clearTimeout(t); process.exit(1); });
 }
 process.on('uncaughtException', (err) => die('An uncaught exception', err));
@@ -76,7 +77,7 @@ function shutdown(code = 0) {
   stopping = true;
   try { teardown?.(); } catch (err) { console.warn(`  ! ${info?.qualifiedId}.teardown: ${err.message}`); }
   try { server?.close(); } catch {}
-  setTimeout(() => process.exit(code), 20);
+  setTimeout(() => process.exit(code), STOP_FLUSH_MS);
 }
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => shutdown(0));
 process.on('disconnect', () => shutdown(0));   // the shell is gone: tear down, never linger as an orphan
@@ -109,7 +110,7 @@ process.on('message', async (msg) => {
       send({ type: 'load-error', message: `mountRoutes threw: ${err?.message || err}` }, () => process.exit(0));
       return;
     }
-    server = http.createServer({ maxHeaderSize: 4 * 1024 * 1024 }, (req, res) => { handle(req, res); });
+    server = http.createServer({ maxHeaderSize: MAX_HEADER_BYTES }, (req, res) => { handle(req, res); });
     server.on('error', (err) => send({ type: 'load-error', message: `could not listen: ${err.message}` }, () => process.exit(0)));
     server.listen(info.socketPath, () => send({ type: 'ready' }));
   }

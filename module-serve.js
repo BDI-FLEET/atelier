@@ -43,8 +43,9 @@ import path from 'node:path';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { pathToFileURL } from 'node:url';
 import { getJsx } from './build.js';
-import { readModuleJson, TOOL_NAME } from './module-json.js';
+import { readModuleJson, TOOL_NAME, BACKEND_FILE, FRONTEND_FILE } from './module-json.js';
 import { createRouter, readJsonBody, headerObject, CALLER_HEADER, MODULE_ID } from './router.js';
+import { MAX_HEADER_BYTES, STOP_FLUSH_MS, TEACHING_CHARS } from './limits.js';
 
 function args(argv) {
   const o = { dir: null, id: null, socket: null, data: null, workspace: 'global' };
@@ -92,7 +93,7 @@ const SKIP = (name) => /^[._-]/.test(name) || name === 'data' || name === 'node_
 function servable(abs) {
   const rel = path.relative(o.dir, abs);
   if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return null;
-  if (rel.split(path.sep).some(SKIP) || rel === 'backend.js' || abs === o.data || abs.startsWith(o.data + path.sep)) return null;
+  if (rel.split(path.sep).some(SKIP) || rel === BACKEND_FILE || abs === o.data || abs.startsWith(o.data + path.sep)) return null;
   try { if (!fs.lstatSync(abs).isFile()) return null; } catch { return null; }   // a symlink is never served
   return rel.split(path.sep).join('/');
 }
@@ -100,7 +101,7 @@ function servable(abs) {
 const importsOf = (src) => [...src.matchAll(/(?:\bfrom\s*|\bimport\s*\(?\s*)['"](\.\.?\/[^'"]+)['"]/g)].map((m) => m[1]);
 async function buildFrontend() {
   // frontend.jsx and every module file it imports by a relative path, transitively
-  const entry = ['frontend.jsx', 'frontend.js'].map((f) => path.join(o.dir, f)).find((f) => fs.existsSync(f));
+  const entry = [FRONTEND_FILE, 'frontend.js'].map((f) => path.join(o.dir, f)).find((f) => fs.existsSync(f));
   const seen = new Set();
   const visit = async (abs) => {
     if (seen.has(abs)) return;
@@ -209,7 +210,7 @@ function loadTools(plug) {
   if (typeof page === 'string' && page) {
     const file = path.resolve(o.dir, page);
     if (!file.startsWith(o.dir + path.sep)) console.warn(`  ! ${qid}/module.json: the teaching ${page} is outside the module, ignored`);
-    else try { teaching = fs.readFileSync(file, 'utf8').slice(0, 16 * 1024); } catch { console.warn(`  ! ${qid}/module.json: the teaching ${page} cannot be read, ignored`); }
+    else try { teaching = fs.readFileSync(file, 'utf8').slice(0, TEACHING_CHARS); } catch { console.warn(`  ! ${qid}/module.json: the teaching ${page} cannot be read, ignored`); }
   }
 }
 
@@ -243,7 +244,7 @@ async function toolRequest(req, res, p, caller) {
 // ---- start: the frontend built, the backend mounted, then the socket ----
 await buildFrontend();
 let teardown = null;
-const backend = path.join(o.dir, 'backend.js');
+const backend = path.join(o.dir, BACKEND_FILE);
 if (fs.existsSync(backend)) {
   const mod = await import(pathToFileURL(backend).href);
   const plug = mod.default;
@@ -256,7 +257,7 @@ if (fs.existsSync(backend)) {
 } else if (wanted.length) console.warn(`  ! ${qid}: module.json declares tools and there is no backend.js; none served`);
 try { if (fs.lstatSync(o.socket).isSocket()) fs.rmSync(o.socket); } catch {}
 // each request to the module's API, one line with its status and time (`atelier logs` shows them, `atelier ps` the last one)
-const server = http.createServer({ maxHeaderSize: 4 * 1024 * 1024 }, (req, res) => {
+const server = http.createServer({ maxHeaderSize: MAX_HEADER_BYTES }, (req, res) => {
   const t0 = Date.now(), p = (req.url || '/').split('?')[0];
   if (p.startsWith('/api/')) res.on('finish', () => console.log(`${new Date().toISOString()} · request · ${req.method} ${p} ${res.statusCode} ${Date.now() - t0}ms`));
   handle(req, res);
@@ -273,6 +274,6 @@ const shutdown = () => {
   try { teardown?.(); } catch (err) { console.warn(`  ! ${qid}.teardown: ${err.message}`); }
   server.close();
   try { fs.rmSync(o.socket, { force: true }); } catch {}
-  setTimeout(() => process.exit(0), 20);
+  setTimeout(() => process.exit(0), STOP_FLUSH_MS);
 };
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, shutdown);

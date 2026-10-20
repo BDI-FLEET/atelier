@@ -28,10 +28,12 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import readline from 'node:readline/promises';
 import { spawnSync } from 'node:child_process';
-import { failer, whereOf, runOp, exitOf, PIECE, sizeWords } from './ops.js';
+import { failer, whereOf, runOp, exitOf, sizeWords } from './ops.js';
+import { PIECE } from './limits.js';
 import { readArgs, helpOf, REMOTE } from './args.js';
 
 const SUBS = ['pull', 'push'];
+const SNAPSHOT = 'data.tar';
 const SPEC = {
   usage: 'atelier data pull [-r remote] [--yes]\n       atelier data push [-r remote] [--confirm <app>]',
   options: [REMOTE, { flag: '--yes', subs: ['pull'], help: "replace this folder's data/ without asking" },
@@ -57,7 +59,7 @@ if (sub === 'pull') {
   }
   const work = fs.mkdtempSync(path.join(where.dir, '.atelier-data-'));
   process.on('exit', () => fs.rmSync(work, { recursive: true, force: true }));
-  const tar = path.join(work, 'data.tar');
+  const tar = path.join(work, SNAPSHOT);
   {
     const code = await runOp('data', where, { verb: 'data-pull' }, {
       // the snapshot in pieces: { get, at } until it is all here, checked by its sha256
@@ -102,7 +104,7 @@ if (confirm === null) {
 if (confirm !== where.module) fail(`"${confirm}" is not ${where.module}; nothing changed`, 1);
 const work = fs.mkdtempSync(path.join(where.dir, '.atelier-data-'));
 process.on('exit', () => fs.rmSync(work, { recursive: true, force: true }));
-const tar = path.join(work, 'data.tar');
+const tar = path.join(work, SNAPSHOT);
 {
   const t = spawnSync('tar', ['-cf', tar, '-C', where.dir, 'data'], { encoding: 'utf8' });
   if (t.status !== 0) fail(`data/ could not be packed: ${(t.stderr || '').trim()}`, 1);

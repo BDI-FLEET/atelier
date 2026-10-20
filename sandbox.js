@@ -7,9 +7,10 @@
  * lines: a `hello { sandbox, cwd }` first (the computer checks who is
  * calling), then one request per line, each answered on one line with its id.
  *
- * Kept dependency-free (node builtins only).
+ * Kept free of packages (node builtins and limits.js only).
  */
 import net from 'node:net';
+import { SOCKET_ANSWER_MS } from './limits.js';
 
 /* In a sandbox: both variables set. Then the CLI asks the socket, never a session. */
 export const inSandbox = () => !!(process.env.ATELIER_SOCKET && process.env.ATELIER_SANDBOX);
@@ -20,7 +21,7 @@ export const inSandbox = () => !!(process.env.ATELIER_SOCKET && process.env.ATEL
  * and the wait starts again with each one. An op (logs, run, …) sends `{ line }`
  * (the computer's words) and `{ out }` (output as it came): each frame goes to
  * `onFrame` when given. */
-export function askSocket(request, { timeoutMs = 60_000, onLine, onFrame } = {}) {
+export function askSocket(request, { timeoutMs = SOCKET_ANSWER_MS, onLine, onFrame } = {}) {
   return new Promise((resolve) => {
     const c = net.connect(process.env.ATELIER_SOCKET);
     let buf = '', done = false;
