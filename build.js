@@ -170,15 +170,16 @@ export async function getJsxBundle(srcPath, absWorkingDir, nodeEnv = 'developmen
 
 const inflightCss = new Map();   // srcPath → { mtimeMs, promise }
 
-export async function getCss(srcPath, scanSources, scanBase) {
+export async function getCss(srcPath, scanSources, scanBase, key = srcPath) {
   // scanSources are absolute paths; they drive both mtime checks and the
-  // scanner's content list.
+  // scanner's content list. `key` tells apart two builds of one stylesheet
+  // over different sources (the page's, and a frame's: one module's only).
   const mtime = maxMtime([srcPath, ...scanSources]);
-  const cached = cache.get(srcPath);
+  const cached = cache.get(key);
   if (cached && cached.mtimeMs === mtime) return cached;
   // After an invalidation every open tab re-requests styles.css at once; they
   // must share ONE build, not run serial rebuilds back-to-back.
-  const running = inflightCss.get(srcPath);
+  const running = inflightCss.get(key);
   if (running && running.mtimeMs === mtime) return running.promise;
   const promise = (async () => {
     try {
@@ -187,15 +188,15 @@ export async function getCss(srcPath, scanSources, scanBase) {
         content: await runCss(srcPath, scanSources, scanBase),
         contentType: 'text/css; charset=utf-8',
       };
-      cache.set(srcPath, entry);
+      cache.set(key, entry);
       return entry;
     } finally {
       // Only clear our own entry — an edit mid-build means a newer build may
       // have replaced it, and deleting that one would let a third concurrent
       // request start a duplicate.
-      if (inflightCss.get(srcPath)?.promise === promise) inflightCss.delete(srcPath);
+      if (inflightCss.get(key)?.promise === promise) inflightCss.delete(key);
     }
   })();
-  inflightCss.set(srcPath, { mtimeMs: mtime, promise });
+  inflightCss.set(key, { mtimeMs: mtime, promise });
   return promise;
 }

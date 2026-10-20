@@ -1,5 +1,8 @@
 #!/usr/bin/env node
-/* atelier add — subscribe to a collection and install its modules.
+/* atelier add — clone a module's repository into this instance (modules-git.js);
+ * a source that is a collection: subscribe to it and install its modules.
+ *
+ *   npx atelier add <git-url>                   a module's repository: cloned as <instance>/<name>
  *
  *   npx atelier add github:owner/repo          first contact: clone + install all
  *   npx atelier add <collection>               pull + install what you're missing
@@ -24,6 +27,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { resolveRoot, RESERVED_NAMES } from './discovery.js';
+import { addModule } from './modules-git.js';
 import {
   COLLECTIONS_DIR, collectionDir, collectionsRoot, listCollections, listModuleDirs,
   isModuleFolder, readPkg, git, gitErr, channelHead, aheadOfChannel, extractTreeAt,
@@ -37,7 +41,8 @@ const HOST_DIR = path.dirname(fileURLToPath(import.meta.url));
 const fail = (msg) => { console.error(`\natelier add: ${msg}\n`); process.exit(1); };
 
 /* ---- args ---------------------------------------------------------------- */
-const USAGE = `usage: atelier add <source>                    subscribe to a collection + install all its modules
+const USAGE = `usage: atelier add <git-url>                   clone a module's repository into this instance
+       atelier add <source>                    subscribe to a collection + install all its modules
        atelier add <collection>                pull + install any modules you're missing
        atelier add <collection>/<module>       install one module from a subscribed collection
   <source>   where a collection's git repo lives — always scheme-prefixed:
@@ -90,6 +95,15 @@ function cloneUrlFor(source) {
 
 const localNameFor = (source) =>
   path.basename(cloneUrlFor(source)).replace(/\.git$/, '').replace(/\.bundle$/, '');
+
+/* ---- a module's repository (modules-git.js) ------------------------------------
+ * A source whose top holds a module.json is cloned into the instance as it is;
+ * anything else goes on to the collection form below.
+ * ---------------------------------------------------------------------------- */
+if (isSource(spec) && !as && !workspace && !force) {
+  const r = addModule(ROOT, cloneUrlFor(spec));
+  if (r) process.exit(r.code);
+}
 
 /* ---- subscribe (first contact) ---------------------------------------------- */
 async function subscribe(source) {

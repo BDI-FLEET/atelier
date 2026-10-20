@@ -52,5 +52,6 @@ export default {
     // `global/gate` is in nobody's workspaces (the shell exempts the gate qid
     // from both the presence gate and authorize).
     router.get('/whoami', (q, s) => s.json({ id: q.user.id }))
+    router.post('/echo', async (q, s) => s.json({ echoed: await q.json() }))
   },
 }

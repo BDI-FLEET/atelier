@@ -32,7 +32,8 @@ const HOST_DIR = path.dirname(fileURLToPath(import.meta.url));
 const fail = (msg) => { console.error(`\natelier publish: ${msg}\n`); process.exit(1); };
 
 /* ---- args ---------------------------------------------------------------- */
-const USAGE = `usage: atelier publish <collection> --to <git-url | github:owner/repo>
+const USAGE = `atelier publish moves a collection somewhere others can add it from.
+usage: atelier publish <collection> --to <git-url | github:owner/repo>
        atelier publish <collection> --serve [--port <n>]
        atelier publish <collection> --bundle [<out.bundle>]
   (with no flags: pushes to the collection's existing git origin)`;

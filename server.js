@@ -44,12 +44,14 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import zlib from 'node:zlib';
 import { createRequire } from 'node:module';
-import { execFile } from 'node:child_process';
+import { execFile, fork } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { build as esbuildBuild } from 'esbuild';
 import { WebSocketServer } from 'ws';
 import { getJsx, getJsxBundle, getCss } from './build.js';
 import { resolveModuleChrome, missingChrome } from './chrome-resolve.js';
+import { readModuleJson, sidebarFields } from './module-json.js';
+import { createRouter, bodyOf, headerObject, CALLER_HEADER, MODULE_ID } from './router.js';
 import {
   loadConfig, loadModuleConfig, shouldIncludeModule, collectConfigPaths, resolvePathEntry,
   CONFIG_FILENAME, resolveRoot,
@@ -111,6 +113,14 @@ const AUTH = (() => {                                     // auth module path/na
   return (v === false || v == null || v === 'false' || v === 'off' || v === '') ? false : v;
 })();
 const REVALIDATE_MS = Number(envOr('ATELIER_REVALIDATE_MS', 'revalidateMs', 30000)); // WS session re-check interval
+// Frames: every module is shown in a frame on its own origin, `<id>.localhost:<port>` on a laptop (a workspace module:
+// `<id>.<workspace>.localhost`). `frameDomain` names another parent domain for a machine reached by name
+// (`<id>.<frameDomain>`, scheme and port from baseUrl); a wildcard DNS name for it points at the instance.
+const FRAME_DOMAIN = envOr('ATELIER_FRAME_DOMAIN', 'frameDomain', null);
+// The host switch: a JS file the host names. When set, the shell trusts the caller header the host sets in front of
+// it, and takes from the file, when it exports them, who the person is (`person(req)`) and the sidebar
+// (`sidebar(req, person)`). Without it: a plain instance, and the caller header is ignored.
+const HOSTED = envOr('ATELIER_HOSTED', 'hosted', null);
 
 // Publish the resolved port/host/baseUrl so modules (and processes they spawn)
 // read the same values. HOST lets a module's sidecar listener follow the
@@ -131,6 +141,51 @@ if (!AUTH && !LOOPBACK_HOST) {
   console.warn(`  ! auth is off and baseUrl is ${BASE_URL} — this instance is ungated. Set "auth" in ${CONFIG_FILENAME} to gate it.`);
 }
 
+// The host's file, loaded once at boot. A host that names a file the shell cannot load stops the start: falling back
+// to "no host" would silently drop who the person is and where the sidebar comes from.
+let HOST_PERSON = null;    // (req) → { person, name } | null
+let HOST_SIDEBAR = null;   // (req, person) → [{ id, name, icon, origin, workspace? }]
+// The host's own pages (pages are the host's, apps are frames): `pages` maps a path to { title, file, icon?,
+// sidebar? } (each listed in the sidebar as an entry, in the order given, before the modules, unless sidebar: false), and the
+// one key `signIn` names the page shown, at whatever path was asked, when person() says nobody. A page is a React
+// component (the file's default export), written like a module frontend: JSX transformed per file, React from the page,
+// `@atelier/kit` from the chrome. It runs in the page itself, inside the chrome's content area, never in a frame. The
+// files live in one folder, served at /_atelier/pages/<name>.js to anyone (the sign-in page loads before a session).
+let HOST_PAGES = null;     // { paths: Map<path, { title, src }>, signIn: { title, src } | null, dir }
+function loadHostPages(pages, base) {
+  const out = { paths: new Map(), signIn: null, dir: null };
+  for (const [key, def] of Object.entries(pages || {})) {
+    if (key !== 'signIn' && !/^\/[a-zA-Z0-9_\-/]*$/.test(key)) throw new Error(`pages: "${key}" is not a path (/…) or signIn`);
+    if (!def || typeof def.title !== 'string' || typeof def.file !== 'string') throw new Error(`pages: "${key}" needs { title, file }`);
+    const file = resolvePathEntry(def.file, base);
+    if (!file || !/\.jsx?$/.test(file) || !fs.existsSync(file)) throw new Error(`pages: "${key}": no .jsx or .js file at ${def.file}`);
+    const dir = path.dirname(file), name = path.basename(file).replace(/\.jsx?$/, '');
+    if (out.dir && out.dir !== dir) throw new Error(`pages: every page file lives in one folder (${out.dir}, not ${dir})`);
+    if (!/^[a-z0-9-]+$/.test(name)) throw new Error(`pages: "${key}": a file name is a-z, 0-9 and -`);
+    out.dir = dir;
+    if (def.icon !== undefined && (typeof def.icon !== 'string' || !/^[a-z0-9-]{1,40}$/.test(def.icon))) throw new Error(`pages: "${key}": icon is a lucide name (a-z, 0-9, -)`);
+    if (def.sidebar !== undefined && typeof def.sidebar !== 'boolean') throw new Error(`pages: "${key}": sidebar is true or false`);
+    // listed in the sidebar unless it says sidebar: false; its icon for the chrome's rail
+    const page = { title: def.title, src: `/_atelier/pages/${name}.js`, ...(def.icon ? { icon: def.icon } : {}), ...(def.sidebar === false ? { sidebar: false } : {}) };
+    if (key === 'signIn') out.signIn = page;
+    else out.paths.set(key.length > 1 ? key.replace(/\/+$/, '') : key, page);
+  }
+  return out;
+}
+if (HOSTED) {
+  const file = resolvePathEntry(String(HOSTED), ROOT);
+  try {
+    const hooks = await import(pathToFileURL(file).href);
+    if (typeof hooks.person === 'function') HOST_PERSON = hooks.person;
+    if (typeof hooks.sidebar === 'function') HOST_SIDEBAR = hooks.sidebar;
+    if (hooks.pages && typeof hooks.pages === 'object') HOST_PAGES = loadHostPages(hooks.pages, path.dirname(file));
+  } catch (err) {
+    console.error(`\n  hosted: could not load ${file}: ${err.message}\n`);
+    process.exit(1);
+  }
+  console.log(`  hosted by ${file}: the caller from ${CALLER_HEADER}${HOST_PERSON ? ', the person from person()' : ''}${HOST_SIDEBAR ? ', the sidebar from sidebar()' : ''}${HOST_PAGES ? `, its pages ${[...HOST_PAGES.paths.keys()].join(' ')}${HOST_PAGES.signIn ? ' and its sign-in' : ''}` : ''}`);
+}
+
 // Hoisted up here (out of the WS section below) because module mounting
 // happens at `await mountPendingBackends()` further down, and a module's
 // mountRoutes can spawn child processes whose stdout/stderr stream events
@@ -147,127 +202,6 @@ const wsClients = new Set();
 // where this Map would otherwise be declared. Without hoisting, every
 // mount throws a TDZ ReferenceError.
 const authPlugs = new Map();           // qualifiedId → plug
-
-// ------------------------------------------------------------------------
-// Router — tiny path+method matcher with req.json / res.json helpers
-// ------------------------------------------------------------------------
-
-// Routes are namespaced by URL: a module mounts at `/api/<ws>/<id>` and
-// its handlers receive relative paths (`/spaces`, not `/api/kanban/spaces`).
-// `makeModuleScope` prefixes paths with `/api/<ws>/<id>` before they hit
-// `_add`, so the router itself stays untyped — first match wins.
-function createRouter() {
-  const routes = [];
-
-  function compile(pathPattern) {
-    const paramNames = [];
-    const re = new RegExp(
-      '^' +
-        pathPattern
-          .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-          .replace(/:([a-zA-Z_]\w*)/g, (_, n) => {
-            paramNames.push(n);
-            return '([^/]+)';
-          }) +
-        '$'
-    );
-    return { re, paramNames };
-  }
-
-  function add(method, pathPattern, handler) {
-    const { re, paramNames } = compile(pathPattern);
-    const entry = { method, re, paramNames, handler };
-    routes.push(entry);
-    return entry;
-  }
-
-  function remove(entry) {
-    const i = routes.indexOf(entry);
-    if (i >= 0) routes.splice(i, 1);
-  }
-
-  async function handle(req, res) {
-    const url = new URL(req.url, `http://localhost`);
-    for (const r of routes) {
-      if (r.method !== req.method) continue;
-      const m = r.re.exec(url.pathname);
-      if (!m) continue;
-      const params = {};
-      r.paramNames.forEach((n, i) => { params[n] = decodeURIComponent(m[i + 1]); });
-      req.params = params;
-      req.query = Object.fromEntries(url.searchParams.entries());
-      req.json = () => bodyOf(req);
-      res.json = (data, status = 200) => {
-        res.writeHead(status, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(data));
-      };
-      try {
-        await r.handler(req, res);
-      } catch (err) {
-        const status = err.statusCode || 500;
-        if (!res.writableEnded) {
-          res.writeHead(status, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: err.message }));
-        }
-        if (status >= 500) console.error(err);   // 4xx are client errors, not shell faults — don't spam the log
-      }
-      return true;
-    }
-    return false;
-  }
-
-  return {
-    get:    (p, h) => { add('GET',    p, h); },
-    post:   (p, h) => { add('POST',   p, h); },
-    put:    (p, h) => { add('PUT',    p, h); },
-    delete: (p, h) => { add('DELETE', p, h); },
-    patch:  (p, h) => { add('PATCH',  p, h); },
-    handle,
-    _add: add,        // returns the entry — used by per-module scopes
-    _remove: remove,  // used on hot-swap to strip a module's routes
-  };
-}
-
-// Cap request bodies so an exposed instance can't be memory-DoS'd by an
-// oversized POST. 10 MB is generous for module APIs; over that, the handler's
-// `await req.json()` rejects with a 413 (the error carries statusCode, which
-// the router honors). Bodies are only buffered when a handler reads them via
-// req.json() — handlers that ignore the body never accumulate it.
-const MAX_JSON_BODY = 10 * 1024 * 1024;
-function readJsonBody(req) {
-  return new Promise((resolve, reject) => {
-    let body = '';
-    let size = 0;
-    let over = false;
-    req.on('data', (chunk) => {
-      if (over) return;                      // past the cap — discard, don't grow memory
-      size += chunk.length;
-      if (size > MAX_JSON_BODY) {
-        over = true;
-        const err = new Error(`request body exceeds ${MAX_JSON_BODY} bytes`);
-        err.statusCode = 413;
-        reject(err);
-        return;
-      }
-      body += chunk;
-    });
-    req.on('end', () => {
-      if (over) return;
-      if (!body) return resolve({});
-      try { resolve(JSON.parse(body)); }
-      catch (e) { reject(e); }
-    });
-    req.on('error', reject);
-  });
-}
-
-// Memoize the parsed body on the request. A request stream can only be
-// consumed once, but two trusted readers may want it: the auth module's
-// `authorize` hook (payload-level checks) and the module's own handler. Both
-// go through `bodyOf`, so the stream is read once and they share the result.
-function bodyOf(req) {
-  return (req.__bodyPromise ??= readJsonBody(req));
-}
 
 // ------------------------------------------------------------------------
 // Workspaces
@@ -608,22 +542,37 @@ async function readMeta(src, label) {
   return sand.meta;
 }
 
+// module.json, the module's declaration, read beside the frontend's `meta`. Its name, icon, group, color and primary
+// win where present; a module without one keeps its `meta` as it is. Problems (an unknown key, a value of the
+// wrong kind) are reported once per edit of the file.
+const reportedModuleJson = new Map();   // qid → mtimeMs reported
+function moduleDeclaration(m) {
+  const d = readModuleJson(m.dir);
+  if (d.problems.length && reportedModuleJson.get(m.qualifiedId) !== d.mtimeMs) {
+    reportedModuleJson.set(m.qualifiedId, d.mtimeMs);
+    for (const p of d.problems) console.warn(`  ! ${m.qualifiedId}/module.json: ${p}`);
+  }
+  return d;
+}
+
 async function getModuleMeta(m) {
   if (!m.hasFrontend) return {};
   const src = path.join(m.dir, 'frontend.jsx');
   let mtimeMs;
   try { mtimeMs = fs.statSync(src).mtimeMs; } catch { return {}; }
+  const decl = moduleDeclaration(m);
+  const key = `${mtimeMs}:${decl.mtimeMs}`;
   const cached = metaCache.get(m.qualifiedId);
-  if (cached && cached.mtimeMs === mtimeMs) return cached.meta;
+  if (cached && cached.mtimeMs === key) return cached.meta;
+  let meta = {};
   try {
-    const meta = await readMeta(src, m.qualifiedId);
-    metaCache.set(m.qualifiedId, { meta, mtimeMs });
-    return meta;
+    meta = await readMeta(src, m.qualifiedId);
   } catch (err) {
     console.warn(`  ! meta read failed for ${m.qualifiedId}: ${err.message}`);
-    metaCache.set(m.qualifiedId, { meta: {}, mtimeMs });
-    return {};
   }
+  meta = { ...meta, ...sidebarFields(decl.declared) };
+  metaCache.set(m.qualifiedId, { meta, mtimeMs: key });
+  return meta;
 }
 
 // Validate standalone target exists at boot (fail fast if typo).
@@ -732,34 +681,13 @@ function makeCtx(m) {
 }
 
 function makeModuleScope(m) {
-  const mine = [];
-  // Routes are namespaced by URL. The scope prefixes every path with
-  // `/api/<workspace>/<id>` before adding to the router, so a module
-  // writes `router.get('/spaces', …)` and it answers at
-  // `/api/global/kanban/spaces` (or `/api/bigcorp/kanban/spaces`).
-  //
-  // Empty path ('' or '/') maps to the bare module root — register that
-  // for a "module index" endpoint at exactly /api/<ws>/<id>.
-  const prefix = `/api/${m.workspace}/${m.id}`;
-  const join = (p) => {
-    if (!p || p === '/') return prefix;
-    return prefix + (p.startsWith('/') ? p : '/' + p);
-  };
-  return {
-    get:    (p, h) => { mine.push(router._add('GET',    join(p), h)); },
-    post:   (p, h) => { mine.push(router._add('POST',   join(p), h)); },
-    put:    (p, h) => { mine.push(router._add('PUT',    join(p), h)); },
-    delete: (p, h) => { mine.push(router._add('DELETE', join(p), h)); },
-    patch:  (p, h) => { mine.push(router._add('PATCH',  join(p), h)); },
-    _dispose() {
-      for (const e of mine) router._remove(e);
-      mine.length = 0;
-    },
-  };
+  // A module writes `router.get('/spaces', …)` and it answers at `/api/global/kanban/spaces` (or
+  // `/api/bigcorp/kanban/spaces`); `''` or `/` is the bare module root.
+  return router.scope(`/api/${m.workspace}/${m.id}`);
 }
 
 let importSalt = 0;
-async function importBackend(m) {
+async function bundleBackend(m) {
   // Bundle the module's backend + first-party transitive imports into a
   // single data-URL ESM chunk and import that. Each bundle produces a new
   // URL (unique byte content → unique data URL), so Node's import cache
@@ -785,7 +713,14 @@ async function importBackend(m) {
     logLevel: 'silent',
     define: { 'import.meta.url': JSON.stringify(pathToFileURL(entry).href) },
   });
-  const code = result.outputFiles[0].text;
+  return result.outputFiles[0].text;
+}
+
+// The configured auth module (the gate) is the one backend that stays in the shell's process: the shell calls its
+// `authenticate` / `authorize` / `handleUnauth` on every request and `handleUnauth` owns the response. It is the
+// shell's trusted layer, not a feature module. Every other backend runs as its own process (below).
+async function importBackend(m) {
+  const code = await bundleBackend(m);
   // Salt every load with a URL fragment: Node's ESM loader caches by full
   // specifier — including a REJECTED evaluation — so an unchanged bundle (same
   // data: URL) would replay the cached failure forever. The case that needs a
@@ -845,18 +780,251 @@ function enrichBackendError(err, dir) {
   }
   return msg;
 }
-function setBackendError(qid, message) {
-  if (backendErrors.get(qid)?.message === message) return false;  // debounce identical repeats (e.g. a rogue timer)
-  backendErrors.set(qid, { message });
+// `kind` tells a backend that could not load ('load': the watcher retries on any file event, a dependency arriving
+// heals it) from one whose process ended ('crash': the shell restarts it with backoff).
+function setBackendError(qid, message, kind = 'load') {
+  const cur = backendErrors.get(qid);
+  if (cur?.message === message) { cur.kind = kind; return false; }  // debounce identical repeats (e.g. a rogue timer)
+  backendErrors.set(qid, { message, kind });
   wsBroadcastBackendError(qid, message);
   return true;
 }
 function clearBackendError(qid) {
   if (backendErrors.delete(qid)) wsBroadcastBackendError(qid, null);
 }
+const loadFailed = (qid) => backendErrors.get(qid)?.kind === 'load';
+
+// ------------------------------------------------------------------------
+// A process per backend.
+//
+// The shell starts each module's backend as its own node process: a module that crashes or loops takes down its own
+// process and nothing else. Each backend.js is bundled here and handed to a fresh node
+// process running backend-host.js, which mounts it with the same router and ctx and listens on a unix socket in a
+// folder only this user can open. The shell proxies the module's `/api/<ws>/<id>/…` lane to that socket and relays
+// its `ctx.broadcast` (IPC) onto the module's real-time topic.
+//
+//   • A crash (an uncaught throw, process.exit, out of memory) ends that process: the shell logs one line, the
+//     module's lane answers 500 with the error, and a fresh process starts after 1 s, 2 s, 4 s … at most 30 s; the
+//     wait goes back to 1 s once a process has stayed up a minute.
+//   • A loop: the shell pings every process every 2 s; one that has not answered for LOOP_MS is killed, then
+//     restarted the same way.
+//   • A save restarts that module's process alone: the new code loads in a new process first; if it fails, the old
+//     one keeps serving. If it loads, the old process tears down, then the new one mounts.
+// ------------------------------------------------------------------------
+
+const backendProcs = new Map();       // qid → { m, b (current process or null), backoff, upSince, restartTimer, gone }
+const mountingBackends = new Map();   // qid → promise of a mount in flight
+const BACKEND_HOST = path.join(HOST_DIR, 'backend-host.js');
+const LOOP_MS = Number(process.env.ATELIER_BACKEND_LOOP_MS || 10000);
+const SOCK_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'atelier-'));   // 0700: the sockets are the shell's alone
+let sockGen = 0;
+
+function isGateModule(m) {
+  if (!AUTH || m.workspace !== GLOBAL_WORKSPACE) return false;
+  const wantId = path.basename(String(AUTH));
+  return m.qualifiedId === AUTH || m.qualifiedId === `${GLOBAL_WORKSPACE}/${wantId}` || m.id === wantId;
+}
+
+// Fork one process for module m and hand it the bundled code. Returns the handle; `wait(types)` resolves with the
+// next message of those types, or { type: 'exit' } if the process ends first.
+function forkBackend(m, code) {
+  const socketPath = path.join(SOCK_DIR, `${crypto.createHash('sha1').update(m.qualifiedId).digest('hex').slice(0, 10)}-${++sockGen}.sock`);
+  const child = fork(BACKEND_HOST, [], { stdio: ['ignore', 'inherit', 'inherit', 'ipc'] });
+  const b = { m, child, socketPath, alive: true, crashMessage: null, lastPong: Date.now(), stopping: false, loop: false, onExit: null, _wait: null };
+  b.wait = (types) => new Promise((res) => { b._wait = { types, res }; });
+  child.on('message', (msg) => {
+    if (!msg || typeof msg !== 'object') return;
+    if (msg.type === 'broadcast') { wsBroadcastFromModule(m.qualifiedId, msg.event || {}); return; }
+    if (msg.type === 'pong') { b.lastPong = Date.now(); return; }
+    if (msg.type === 'crash') { b.crashMessage = msg.message; return; }
+    if (b._wait && b._wait.types.includes(msg.type)) { const w = b._wait; b._wait = null; w.res(msg); }
+  });
+  child.on('error', () => {});
+  child.on('exit', (code, signal) => {
+    b.alive = false;
+    try { fs.unlinkSync(socketPath); } catch {}
+    if (b._wait) { const w = b._wait; b._wait = null; w.res({ type: 'exit', code, signal }); }
+    b.onExit?.(code, signal);
+  });
+  child.send({
+    type: 'load',
+    code,
+    info: {
+      id: m.id, workspace: m.workspace, qualifiedId: m.qualifiedId,
+      label: LABEL, port: PORT, host: HOST, baseUrl: BASE_URL,
+      dataDir: path.join(m.dir, 'data'), socketPath,
+    },
+  });
+  return b;
+}
+const exitWords = (b, r) => b.crashMessage || `the backend process ended (${r.signal || `exit ${r.code}`})`;
+
+// Bundle and load module m in a new process, not yet mounted. → { b } or { error }
+async function loadBackendProcess(m) {
+  let code;
+  try { code = await bundleBackend(m); } catch (err) { return { error: err?.message || String(err) }; }
+  const b = forkBackend(m, code);
+  const r = await b.wait(['loaded', 'load-error']);
+  if (r.type === 'loaded') return { b };
+  return { error: r.type === 'load-error' ? r.message : exitWords(b, r) };
+}
+// Mount a loaded process: mountRoutes runs, the socket listens. → null, or the error.
+async function mountBackendProcess(b) {
+  b.child.send({ type: 'mount' });
+  const r = await b.wait(['ready', 'load-error']);
+  if (r.type === 'ready') { b.lastPong = Date.now(); return null; }
+  return r.type === 'load-error' ? r.message : exitWords(b, r);
+}
+function killBackend(b, signal = 'SIGTERM') {
+  if (!b || !b.alive) return;
+  b.stopping = true;
+  try { b.child.kill(signal); } catch {}
+}
+// Ask a process to tear down and wait for it; SIGKILL after 2 s.
+function stopBackend(b) {
+  if (!b || !b.alive) return Promise.resolve();
+  b.stopping = true;
+  return new Promise((res) => {
+    const t = setTimeout(() => { try { b.child.kill('SIGKILL'); } catch {} }, 2000);
+    b.child.once('exit', () => { clearTimeout(t); res(); });
+    try { b.child.send({ type: 'stop' }); } catch { try { b.child.kill('SIGTERM'); } catch {} }
+  });
+}
+
+function adoptBackend(m, b) {
+  let e = backendProcs.get(m.qualifiedId);
+  if (!e) { e = { m, b: null, backoff: 0, upSince: 0, restartTimer: null, gone: false }; backendProcs.set(m.qualifiedId, e); }
+  e.m = m;
+  e.b = b;
+  e.upSince = Date.now();
+  b.onExit = (code, signal) => onBackendExit(e, b, { code, signal });
+  return e;
+}
+
+function onBackendExit(e, b, r) {
+  if (b.stopping || e.b !== b || e.gone) return;   // stopped on purpose, or replaced
+  e.b = null;
+  const qid = e.m.qualifiedId;
+  const why = b.loop ? `stopped answering for ${Math.round(LOOP_MS / 1000)} s (a loop?) and was killed` : exitWords(b, r);
+  e.backoff = (Date.now() - e.upSince > 60000 || !e.backoff) ? 1000 : Math.min(e.backoff * 2, 30000);
+  setBackendError(qid, b.loop ? `This module's backend ${why}.` : enrichBackendError(why, e.m.dir), 'crash');
+  console.error(`  ! ${qid}: backend process ended (${b.loop ? 'no answer, killed' : r.signal || `exit ${r.code}`}) · restarting in ${e.backoff / 1000} s · the rest keeps running`);
+  clearTimeout(e.restartTimer);
+  e.restartTimer = setTimeout(() => {
+    e.restartTimer = null;
+    if (e.gone || e.b) return;
+    startBackendProcess(e.m, 'restarted').catch((err) => console.error(`  ! restart ${qid}: ${err.message}`));
+  }, e.backoff);
+}
+
+async function startBackendProcess(m, verb = 'mounted') {
+  const qid = m.qualifiedId;
+  const fail = (raw, b) => {
+    killBackend(b, 'SIGKILL');
+    const message = enrichBackendError(raw, m.dir);
+    console.error(`  ! ${qid}: backend failed to load — ${message}`);
+    setBackendError(qid, message, 'load');
+    return false;
+  };
+  const r = await loadBackendProcess(m);
+  if (r.error) return fail(r.error);
+  const e = backendProcs.get(qid);
+  if (e?.gone) { killBackend(r.b, 'SIGKILL'); return false; }
+  const err = await mountBackendProcess(r.b);
+  if (err) return fail(err, r.b);
+  adoptBackend(m, r.b);
+  clearBackendError(qid);
+  console.log(`  + ${verb} ${qid} backend · pid ${r.b.child.pid}`);
+  return true;
+}
+
+async function reloadBackendProcess(m) {
+  const qid = m.qualifiedId;
+  const r = await loadBackendProcess(m);
+  if (r.error) {
+    const message = enrichBackendError(r.error, m.dir);
+    if (setBackendError(qid, message, 'load')) console.error(`  ! ${qid}: reload failed, keeping current version — ${message}`);
+    return;
+  }
+  const e = backendProcs.get(qid);
+  if (e) { clearTimeout(e.restartTimer); e.restartTimer = null; await stopBackend(e.b); e.b = null; }
+  const err = await mountBackendProcess(r.b);
+  if (err) {
+    killBackend(r.b, 'SIGKILL');
+    const message = enrichBackendError(err, m.dir);
+    console.error(`  ! ${qid}: reload failed — ${message}`);
+    setBackendError(qid, message, 'load');
+    return;
+  }
+  const ne = adoptBackend(m, r.b);
+  ne.backoff = 0;
+  clearBackendError(qid);
+  console.log(`  ↻ reloaded ${qid} backend · pid ${r.b.child.pid}`);
+}
+
+async function stopBackendProcess(qid) {
+  const e = backendProcs.get(qid);
+  if (!e) return;
+  e.gone = true;
+  clearTimeout(e.restartTimer);
+  backendProcs.delete(qid);
+  await stopBackend(e.b);
+}
+
+// The watchdog for loops: a process blocked in a loop cannot answer a ping.
+setInterval(() => {
+  const now = Date.now();
+  for (const e of backendProcs.values()) {
+    const b = e.b;
+    if (!b || !b.alive || b.stopping) continue;
+    if (now - b.lastPong > LOOP_MS) { b.loop = true; try { b.child.kill('SIGKILL'); } catch {} continue; }
+    try { b.child.send({ type: 'ping' }); } catch {}
+  }
+}, 2000).unref();
+
+// The module's lane, forwarded to its process. `shell` is what the shell decided about the request (the user the
+// gate resolved, the caller); it rides on a header only the shell sets, on a socket only the shell can open.
+async function proxyToBackend(req, res, e, shell) {
+  const qid = e.m.qualifiedId;
+  const b = e.b;
+  if (!b || !b.alive) {
+    res.writeHead(503, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'backend restarting', module: qid }));
+    return;
+  }
+  const headers = { ...req.headers };
+  delete headers[CALLER_HEADER];
+  headers['x-atelier-shell'] = Buffer.from(JSON.stringify(shell)).toString('base64');
+  // The gate's `authorize` may have read the body already (bodyOf memoizes it): send what it parsed.
+  let body = null;
+  if (req.__bodyPromise) {
+    try { body = Buffer.from(JSON.stringify(await req.__bodyPromise)); } catch { body = Buffer.from('{}'); }
+    headers['content-length'] = String(body.length);
+    delete headers['transfer-encoding'];
+  }
+  // A body the module stopped reading (a 413) is drained here, as the in-process router did, so the connection stays
+  // usable for the browser's next request.
+  const drain = () => { if (!req.complete) { req.unpipe(preq); req.resume(); } };
+  const preq = http.request({ socketPath: b.socketPath, method: req.method, path: req.url, headers }, (pres) => {
+    res.writeHead(pres.statusCode, pres.statusMessage, pres.headers);
+    pres.pipe(res);
+    pres.on('end', drain);
+  });
+  preq.on('error', () => {
+    drain();
+    if (!res.headersSent) {
+      res.writeHead(502, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'backend unreachable', module: qid }));
+    } else if (!res.writableFinished) res.destroy();
+  });
+  res.on('close', () => { if (!res.writableFinished) preq.destroy(); });
+  if (body) preq.end(body);
+  else req.pipe(preq);
+}
 
 async function mountBackend(m) {
   watchBackend(m);  // always watch so a broken file can be fixed-and-reloaded
+  if (!isGateModule(m)) { await startBackendProcess(m); return; }
   let plug;
   try { plug = await importBackend(m); }
   catch (err) {
@@ -870,6 +1038,7 @@ async function mountBackend(m) {
 }
 
 async function reloadBackend(m) {
+  if (!isGateModule(m)) { await reloadBackendProcess(m); return; }
   let plug;
   try { plug = await importBackend(m); }
   catch (err) {
@@ -896,6 +1065,7 @@ async function reloadBackend(m) {
 // reality. Without that ping, the rail still shows the removed module
 // until the user manually reloads, and clicks land on a 404 SPA page.
 async function unmountBackend(id, reason = 'removed') {
+  await stopBackendProcess(id);
   const prev = mountedBackends.get(id);
   if (prev) {
     try { prev.teardown?.(); } catch (err) { console.warn(`  ! ${id}.teardown: ${err.message}`); }
@@ -942,7 +1112,7 @@ function watchBackend(m) {
       // installs) and `npm install` finishing — node_modules writes, then the
       // root package-lock.json — is exactly the signal that heals a
       // missing-dependency failure. Zero cost while healthy.
-      const broken = backendErrors.has(m.qualifiedId);
+      const broken = loadFailed(m.qualifiedId);
       if (ignored(segs) && !broken) return;
       // Module dir / backend.js gone → teardown so routes, timers, and file
       // handles don't outlive the source. Existence-checked so a transient
@@ -985,7 +1155,7 @@ function scheduleReload(m) {
     scan(m.dir);
     // A broken backend bypasses the dedupe: its source didn't change — its
     // dependencies did (node_modules isn't scanned) — and a retry is the point.
-    if (mtime && mtime === lastReloadMtime.get(m.qualifiedId) && !backendErrors.has(m.qualifiedId)) return;
+    if (mtime && mtime === lastReloadMtime.get(m.qualifiedId) && !loadFailed(m.qualifiedId)) return;
     lastReloadMtime.set(m.qualifiedId, mtime);
     reloadBackend(m).catch((err) => console.error(`  ! reload ${m.qualifiedId}: ${err.message}`));
   }, 150));
@@ -999,15 +1169,21 @@ async function mountPendingBackends() {
   // catches in-session deletions instantly; this cleans up edge cases (e.g.
   // a module folder removed between server boot and first request, or
   // the watcher missing an event on some filesystems).
-  for (const id of [...mountedBackends.keys()]) {
+  for (const id of [...mountedBackends.keys(), ...backendProcs.keys()]) {
     if (!liveIds.has(id)) await unmountBackend(id, 'not in discovery');
   }
+  // Each backend starts its own process, so they start side by side. A request arriving while one is still starting
+  // waits for it (mountingBackends) instead of finding its routes missing.
+  const starting = [];
   for (const m of live) {
     if (!m.hasBackend) continue;
-    if (attemptedBackends.has(m.qualifiedId)) continue;
+    if (attemptedBackends.has(m.qualifiedId)) { if (mountingBackends.has(m.qualifiedId)) starting.push(mountingBackends.get(m.qualifiedId)); continue; }
     attemptedBackends.add(m.qualifiedId);
-    await mountBackend(m);
+    const p = mountBackend(m).finally(() => mountingBackends.delete(m.qualifiedId));
+    mountingBackends.set(m.qualifiedId, p);
+    starting.push(p);
   }
+  await Promise.all(starting);
 }
 
 // Registered BEFORE the first mount: module code starts running inside
@@ -1036,8 +1212,13 @@ await mountPendingBackends();
 function teardownAllBackends(reason) {
   if (teardownAllBackends.called) return;
   teardownAllBackends.called = true;
-  if (mountedBackends.size === 0) return;
-  console.log(`\n  ${reason}: tearing down ${mountedBackends.size} backend(s)`);
+  // Backend processes: SIGTERM, which their host turns into the module's teardown and an exit. (Should the shell
+  // die without this, each process sees its IPC channel close and tears down the same way.)
+  const procs = [...backendProcs.values()].filter((e) => e.b?.alive);
+  for (const e of backendProcs.values()) { e.gone = true; clearTimeout(e.restartTimer); killBackend(e.b, 'SIGTERM'); }
+  try { fs.rmSync(SOCK_DIR, { recursive: true, force: true }); } catch {}
+  if (mountedBackends.size === 0) { if (procs.length) console.log(`\n  ${reason}: stopping ${procs.length} backend process(es)`); return; }
+  console.log(`\n  ${reason}: tearing down ${mountedBackends.size + procs.length} backend(s)`);
   for (const [id, { scope, teardown }] of mountedBackends) {
     try { teardown?.(); } catch (err) { console.warn(`  ! ${id}.teardown: ${err.message}`); }
     try { scope._dispose(); } catch {}
@@ -1384,6 +1565,7 @@ function walkJsxFiles(dir) {
 // identically; the scan no longer needs each module's meta.
 function cssScanSources() {
   const out = [path.join(HOST_DIR, 'client.jsx')];
+  if (HOST_PAGES?.dir) out.push(...walkJsxFiles(HOST_PAGES.dir));   // the host's pages draw with the chrome's classes
   for (const m of getModules()) {
     if (!m.hasFrontend) continue;
     out.push(...walkJsxFiles(m.dir));
@@ -1469,13 +1651,67 @@ function buildDefaultUser({ metaByQId } = {}) {
 // HTTP requests and WS upgrades; the upgrade path can't render handleUnauth's
 // HTML/JSON so it uses this directly and just drops the socket on null.
 async function gateRequest(req, defaultUser) {
-  const auth = findAuthModule();
-  if (!auth) return defaultUser;
-  try { return (await auth.plug.authenticate(req, defaultUser)) || null; }
-  catch (err) {
-    console.error(`  ! ${auth.m.qualifiedId}.authenticate threw: ${err.message}`);
-    return null;
+  let user;
+  if (HOST_PERSON) {
+    // The host's slot: who the person is. Nothing → not signed in. It replaces the auth module's authenticate.
+    let p = null;
+    try { p = await HOST_PERSON(req); }
+    catch (err) { console.error(`  ! hosted person() threw: ${err.message}`); return null; }
+    if (!p || p.person == null || p.person === '') return null;
+    req.__hostPerson = { person: String(p.person), name: p.name == null ? null : String(p.name) };
+    user = { id: req.__hostPerson.person, name: req.__hostPerson.name, workspaces: defaultUser.workspaces };
+    // the host's sign-out address, for the chrome's account menu; it is not the caller (ctx.caller stays who, nothing else)
+    if (typeof p.logout === 'string' && p.logout.startsWith('/')) user.logout = p.logout;
+  } else {
+    const auth = findAuthModule();
+    if (!auth) user = defaultUser;
+    else {
+      try { user = (await auth.plug.authenticate(req, defaultUser)) || null; }
+      catch (err) {
+        console.error(`  ! ${auth.m.qualifiedId}.authenticate threw: ${err.message}`);
+        return null;
+      }
+    }
   }
+  if (!user || !HOST_SIDEBAR) return user;
+  // The host's source for the sidebar: the modules this person sees, instead of the ones discovered in the folder.
+  return { ...user, workspaces: await sidebarWorkspaces(req, req.__hostPerson || { person: user.id, name: user.name ?? null }) };
+}
+
+// The host's sidebar list → the `user.workspaces` shape the chrome already draws. Each entry: { id, name?, icon?,
+// group?, origin?, workspace? }; `origin` is where the module's frame lives (under the host, not on this machine).
+async function sidebarWorkspaces(req, person) {
+  let list = [];
+  try { list = await HOST_SIDEBAR(req, person); }
+  catch (err) { console.error(`  ! hosted sidebar() threw: ${err.message}`); }
+  const byWs = new Map([[GLOBAL_WORKSPACE, []]]);
+  for (const e of Array.isArray(list) ? list : []) {
+    if (!e || typeof e.id !== 'string' || !MODULE_ID.test(e.id)) continue;
+    const ws = typeof e.workspace === 'string' && MODULE_ID.test(e.workspace) ? e.workspace : GLOBAL_WORKSPACE;
+    const meta = {};
+    for (const k of ['name', 'icon', 'group']) if (typeof e[k] === 'string') meta[k] = e[k];
+    const entry = { id: e.id, meta };
+    if (typeof e.origin === 'string') { try { const u = new URL(e.origin); if (/^https?:$/.test(u.protocol)) entry.origin = u.origin; } catch {} }
+    if (!byWs.has(ws)) byWs.set(ws, []);
+    byWs.get(ws).push(entry);
+  }
+  return [...byWs.entries()]
+    .sort(([a], [b]) => (a === GLOBAL_WORKSPACE ? -1 : b === GLOBAL_WORKSPACE ? 1 : a.localeCompare(b)))
+    .map(([id, modules]) => ({ id, modules }));
+}
+
+// ctx.caller: who is calling, as verified before the request reached the module, and nothing else about the person.
+//   • hosted: the host's header (base64url JSON, set after it verified the caller), else the person slot's answer;
+//   • not hosted: the gate's user ({ person, name }) when an auth module is configured, else null. The header is
+//     ignored, and removed before the request reaches the module, so nobody can spoof it on a plain instance.
+function callerFor(req, user) {
+  if (HOSTED) {
+    const raw = req.headers[CALLER_HEADER];
+    if (raw) return headerObject(raw);
+    return req.__hostPerson || null;
+  }
+  if (findAuthModule() && user && !user.anonymous) return { person: user.id ?? null, name: user.name ?? null };
+  return null;
 }
 
 // Per-request auth gate. Returns the user object on allow, or null when
@@ -1484,6 +1720,12 @@ async function gateRequest(req, defaultUser) {
 async function authenticateRequest(req, res, defaultUser) {
   const user = await gateRequest(req, defaultUser);
   if (user) return user;
+  if (HOST_PERSON) {
+    // The host fills the person; when it has none, the shell says so and nothing more. Signing in is the host's page.
+    res.writeHead(401, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end('not signed in');
+    return null;
+  }
   const auth = findAuthModule();
   if (!auth) return null;
   // Unauth → hand off to the auth module entirely. It owns status, body,
@@ -1588,6 +1830,21 @@ function buildImportMap(chromeQid) {
   return Object.keys(imports).length ? { imports } : null;
 }
 
+// The host's sign-in page for nobody: the chrome's stylesheet and kit (for its AuthLayout), the page, and nothing about
+// any module. 401, so a client that is not a browser still reads "not signed in".
+function serveSignedOut(req, res, template, metaByQId) {
+  const chromeQid = resolveDefaultChromeQid(metaByQId);
+  const chromeMod = chromeQid ? getModules().find((x) => x.qualifiedId === chromeQid) : null;
+  const importMap = buildImportMap(chromeQid);
+  const bootstrap = { mode: MODE, label: LABEL, signedOut: true, signIn: HOST_PAGES.signIn, chromeQid };
+  let html = template.replace('/*__ATELIER_BOOTSTRAP__*/', `window.__ATELIER__ = ${JSON.stringify(bootstrap).replace(/</g, '\\u003c')};`);
+  html = html.replace('<!--__ATELIER_IMPORTMAP__-->', importMap ? `<script type="importmap">${JSON.stringify(importMap)}</script>` : '');
+  html = html.replace('<!--__ATELIER_CHROME_STYLES__-->', chromeMod && fs.existsSync(path.join(chromeMod.dir, 'styles.css'))
+    ? `<link id="atelier-chrome-styles" rel="stylesheet" href="/modules/${chromeQid}/styles.css">` : '');
+  res.writeHead(401, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+  res.end(html);
+}
+
 async function serveIndex(req, res) {
   // Auth runs FIRST. A logged-out visitor must NEVER see workspace info
   // leak in the bootstrap — the unauth handler owns the response and
@@ -1596,8 +1853,15 @@ async function serveIndex(req, res) {
   const metaByQId = await getMetaByQId();
 
   const defaultUser = buildDefaultUser({ metaByQId });
-  const user = await authenticateRequest(req, res, defaultUser);
-  if (!user) return;                    // unauth handler took over the response
+  // Hosted with a sign-in page: nobody signed in gets the host's sign-in page, in the chrome's look, at the asked path.
+  let user;
+  if (HOST_PERSON && HOST_PAGES?.signIn) {
+    user = await gateRequest(req, defaultUser);
+    if (!user) return serveSignedOut(req, res, template, metaByQId);
+  } else {
+    user = await authenticateRequest(req, res, defaultUser);
+    if (!user) return;                  // unauth handler took over the response
+  }
 
   // Workspace identity now lives in the URL path (`/<ws>/<id>`). No
   // canonicalization, no cookie — the client parses the URL on every
@@ -1618,6 +1882,14 @@ async function serveIndex(req, res) {
     chromeQid,
     defaultChromeQid,
     chromes: chromeQids(metaByQId),
+    // The host's own pages, by path: shown in the chrome's content area, not in a frame.
+    ...(HOST_PAGES ? { pages: [...HOST_PAGES.paths].map(([p, x]) => ({ path: p, ...x })) } : {}),
+    // Where each module this person sees is framed: its own origin on this machine. (A host's sidebar entry may
+    // carry its own `origin` instead, which wins.)
+    frames: (() => {
+      const visible = userModuleSet(user);
+      return Object.fromEntries(getModules().filter((m) => m.hasFrontend && visible.has(m.qualifiedId)).map((m) => [m.qualifiedId, frameOriginFor(m)]));
+    })(),
     // Seed only the backend errors this user can see — same per-module ACL as the
     // live WS frames, so a page load never carries another tenant's error/stack.
     backendErrors: (() => {
@@ -1741,6 +2013,8 @@ function wsBroadcastShell(event) {
   const frame = JSON.stringify({ ...event, topic: 'shell' });
   for (const ws of wsClients) {
     if (ws.readyState !== 1) continue;
+    // A frame's channel hears only that its own module changed.
+    if (ws.frameQid && !(event.type === 'reload' && event.moduleId === ws.frameQid)) continue;
     try { ws.send(frame); } catch { /* drop */ }
   }
 }
@@ -1787,8 +2061,9 @@ if (AUTH) {
       let user;
       try { user = await gateRequest(ws.authReq, defaultUser); } catch { user = null; }
       if (!user) { try { ws.close(4001, 'session ended'); } catch {} continue; }
+      if (ws.frameQid && !allowedTopics(user).has(ws.frameQid)) { try { ws.close(4001, 'not yours any more'); } catch {} continue; }
       ws.user = user;
-      ws.allowed = allowedTopics(user);
+      ws.allowed = ws.frameQid ? new Set([ws.frameQid]) : allowedTopics(user);
     }
   }, REVALIDATE_MS);
   timer.unref?.();
@@ -2016,8 +2291,7 @@ function versionRelativeImports(code, v) {
 const GZIP_MIN = 1024;
 const GZIP_TYPES = /^(text\/|application\/(javascript|json|xml))/;
 
-async function serveAsset(req, res, url) {
-  const asset = resolveAssetSource(url.pathname);
+async function serveAsset(req, res, url, asset = resolveAssetSource(url.pathname)) {
   if (!asset) {
     res.writeHead(404);
     res.end('Not found');
@@ -2027,7 +2301,17 @@ async function serveAsset(req, res, url) {
     const headers = {};
     let body;
     let etag = null;
-    if (asset.kind === 'jsx') {
+    if (asset.kind === 'pinned') {                     // the frame's runtime — pinned like client.js
+      const built = await getPinnedShellJsx(asset.src);
+      headers['Content-Type'] = built.contentType;
+      body = built.content;
+      etag = `"${built.mtimeMs}"`;
+    } else if (asset.kind === 'bundle') {              // the chrome's kit, served to a frame
+      const built = await getJsxBundle(asset.src, asset.root, NODE_ENV);
+      headers['Content-Type'] = built.contentType;
+      body = built.content;
+      etag = `"${built.mtimeMs}"`;
+    } else if (asset.kind === 'jsx') {
       const bundleRoot = await chromeBundleRootFor(asset.src);
       const isModuleFrontend = !bundleRoot && !url.pathname.startsWith('/assets/');
       const built = bundleRoot
@@ -2044,7 +2328,9 @@ async function serveAsset(req, res, url) {
       body = (v && /^\d+$/.test(v)) ? versionRelativeImports(built.content, v) : built.content;
       etag = `"${built.mtimeMs}${v ? `-${v}` : ''}"`;
     } else if (asset.kind === 'css') {
-      const built = await getCss(asset.src, cssScanSources(), HOST_DIR);
+      const built = asset.scan
+        ? await getCss(asset.src, asset.scan, HOST_DIR, asset.key)   // a frame's sheet: its own module's classes only
+        : await getCss(asset.src, cssScanSources(), HOST_DIR);
       headers['Content-Type'] = built.contentType;
       body = built.content;
       etag = `"${built.mtimeMs}"`;
@@ -2140,6 +2426,209 @@ if (OBSERVE) setInterval(() => {
   }
 }, 30_000).unref();
 
+// ------------------------------------------------------------------------
+// Frames — every module on its own origin.
+//
+// The instance serves the chrome, which shows every module in a frame on its own origin: an app on its own origin cannot
+// read the page, the sidebar or another app. On a laptop a module's origin is
+// `http://<id>.localhost:<port>` (a workspace module: `<id>.<workspace>.localhost`); browsers send every *.localhost
+// name to this machine, and the shell answers on the same port. On such a host it serves that module and nothing of
+// the shell: the frame document, the frame's runtime (React, frame.js: the module's half of the contract), the
+// chrome's stylesheet built over the chrome's and this module's classes (no other module's), the chrome's kit, the module's own files and API, and a
+// real-time channel carrying only its own topic. Everything else answers 404.
+// ------------------------------------------------------------------------
+
+const FRAME_SUFFIX = '.' + String(FRAME_DOMAIN || 'localhost').toLowerCase();
+const frameLabel = (m) => (m.workspace === GLOBAL_WORKSPACE ? m.id : `${m.id}.${m.workspace}`).toLowerCase();
+function frameOriginFor(m) {
+  if (!FRAME_DOMAIN) return `http://${frameLabel(m)}.localhost:${PORT}`;
+  const u = new URL(BASE_URL);
+  return `${u.protocol}//${frameLabel(m)}.${FRAME_DOMAIN}${u.port ? ':' + u.port : ''}`;
+}
+const hostnameOf = (h) => String(h || '').toLowerCase().replace(/:\d+$/, '');
+const isFrameHost = (req) => hostnameOf(req.headers.host).endsWith(FRAME_SUFFIX);
+// The module a frame host names, from discovery. Two modules with one label (ids differing only in case): neither
+// is framed, rather than the wrong one.
+function frameModuleFor(req) {
+  const name = hostnameOf(req.headers.host);
+  if (!name.endsWith(FRAME_SUFFIX)) return null;
+  const label = name.slice(0, -FRAME_SUFFIX.length);
+  const hits = getModules().filter((m) => m.hasFrontend && frameLabel(m) === label);
+  return hits.length === 1 ? hits[0] : null;
+}
+// A remote module: under a host, a sidebar entry whose `origin` is a frame host of this instance but no module found here
+// (the module runs elsewhere, on a computer the host reaches). On its origin the shell serves the frame's part, the frame
+// page, React, frame.js, the chrome's stylesheet and kit, and its real-time channel; the module's own paths
+// (`/api/<ws>/<id>/…`, `/modules/<ws>/<id>/…`) are the host's to answer before they reach the shell, and 404 here.
+function remoteFrameFor(req, user) {
+  if (!HOST_SIDEBAR || !user) return null;
+  const name = hostnameOf(req.headers.host);
+  for (const ws of user.workspaces || []) for (const m of ws.modules || []) {
+    if (!m.origin) continue;
+    let host;
+    try { host = new URL(m.origin).hostname.toLowerCase(); } catch { continue; }
+    if (host === name) return { qualifiedId: `${ws.id}/${m.id}`, workspace: ws.id, id: m.id, remote: true, name: m.meta?.name || m.id };
+  }
+  return null;
+}
+// Who may embed a frame: this instance's own page, reached as localhost, 127.0.0.1, [::1] or its baseUrl. A baseUrl on a
+// loopback name counts in all three spellings too: a browser on `localhost:<port>` may embed a frame of an instance whose
+// baseUrl says `127.0.0.1:<port>`, the same page under another name.
+const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]']);
+function parentOrigins() {
+  const set = new Set([`http://localhost:${PORT}`, `http://127.0.0.1:${PORT}`, `http://[::1]:${PORT}`]);
+  try {
+    const u = new URL(BASE_URL);
+    set.add(u.origin);
+    if (LOOPBACK.has(u.hostname) && u.protocol === 'http:') for (const h of LOOPBACK) set.add(`http://${h}:${u.port || 80}`);
+  } catch {}
+  return set;
+}
+const escHtml = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+
+async function frameChromeFor(m) {
+  const metaByQId = await getMetaByQId();
+  const qid = resolveChromeForQid(metaByQId, m.qualifiedId);
+  return qid ? getModules().find((x) => x.qualifiedId === qid) || null : null;
+}
+
+async function serveFrameDocument(req, res, url, m) {
+  const meta = m.remote ? { name: m.name } : await getModuleMeta(m);
+  const parents = parentOrigins();
+  const asked = url.searchParams.get('atelier-parent');
+  const parent = asked && parents.has(asked) ? asked : null;   // the bridge talks to this exact origin, or to nobody
+  const chrome = await frameChromeFor(m);
+  const hasKit = chrome && (fs.existsSync(path.join(chrome.dir, 'kit.js')) || fs.existsSync(path.join(chrome.dir, 'kit.jsx')));
+  const hasStyles = chrome && fs.existsSync(path.join(chrome.dir, 'styles.css'));
+  const boot = { qid: m.qualifiedId, workspace: m.workspace, id: m.id, parent, title: meta.name || m.id, observe: OBSERVE };
+  const html = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>${escHtml(boot.title)}</title>
+<style>html{color-scheme:light dark}html,body{margin:0}</style>
+${hasStyles ? '<link id="atelier-frame-styles" rel="stylesheet" href="/_frame/styles.css">' : ''}
+<style>html,html body,html.dark,html.dark body{background:transparent}</style>
+<script src="/_frame/react.js"></script>
+<script src="/_frame/react-dom.js"></script>
+<script>window.__ATELIER_FRAME__ = ${JSON.stringify(boot).replace(/</g, '\\u003c')};</script>
+${hasKit ? `<script type="importmap">${JSON.stringify({ imports: { '@atelier/kit': '/_frame/kit.js' } })}</script>` : ''}
+</head>
+<body>
+<div id="root"></div>
+<script type="module" src="/_frame/frame.js"></script>
+</body>
+</html>`;
+  res.writeHead(200, {
+    'Content-Type': 'text/html; charset=utf-8',
+    'Cache-Control': 'no-store',
+    // Only this instance's page may embed the frame.
+    'Content-Security-Policy': `frame-ancestors ${[...parents].join(' ')}`,
+  });
+  res.end(html);
+}
+
+async function serveFrameHost(req, res, url) {
+  let m = frameModuleFor(req);
+  const notFound = () => { res.writeHead(404, { 'Content-Type': 'text/plain' }); res.end('Not found'); };
+  if (!m && !HOST_SIDEBAR) return notFound();
+  const metaByQId = await getMetaByQId();
+  const user = await authenticateRequest(req, res, buildDefaultUser({ metaByQId }));
+  if (!user) return;
+  // a module that runs elsewhere, framed here because the host's sidebar names this origin for it
+  if (!m) m = remoteFrameFor(req, user);
+  if (!m) return notFound();
+  // The same boundary as the page's sidebar: a module that is not this person's is not there.
+  if ((findAuthModule() || HOST_PERSON || HOST_SIDEBAR) && !userModuleSet(user).has(m.qualifiedId)) return notFound();
+  req.user = user;
+  const own = `/${m.workspace}/${m.id}`;
+  const p = url.pathname;
+  if (req.method === 'GET' && (p === own || p.startsWith(own + '/'))) return serveFrameDocument(req, res, url, m);
+  if (m.remote && (p.startsWith(`/api${own}`) || p.startsWith(`/modules${own}/`))) return notFound();   // the host's
+  if (p.startsWith(`/api${own}/`) || p === `/api${own}`) {
+    if (!(await serveApiLane(req, res, url, user, metaByQId))) notFound();
+    return;
+  }
+  if (p.startsWith(`/modules${own}/`)) return serveAsset(req, res, url);
+  if (p.startsWith('/_frame/')) {
+    const name = p.slice('/_frame/'.length);
+    if (name === 'react.js' || name === 'react-dom.js') return serveAsset(req, res, url, resolveAssetSource(`/assets/${name}`));
+    if (name === 'frame.js') return serveAsset(req, res, url, { kind: 'pinned', src: path.join(HOST_DIR, 'frame.jsx') });
+    if (name === 'ws-bridge.js') return serveAsset(req, res, url, { kind: 'pinned', src: path.join(HOST_DIR, 'ws-bridge.js') });
+    const chrome = await frameChromeFor(m);
+    if (chrome && name === 'styles.css' && fs.existsSync(path.join(chrome.dir, 'styles.css'))) {
+      // a remote module's files are not on this machine: its frame gets the chrome's classes only
+      return serveAsset(req, res, url, { kind: 'css', src: path.join(chrome.dir, 'styles.css'), scan: [...walkJsxFiles(chrome.dir), ...(m.dir ? walkJsxFiles(m.dir) : [])], key: `frame:${m.qualifiedId}` });
+    }
+    if (chrome && name === 'kit.js') {
+      const kit = ['kit.jsx', 'kit.js'].map((f) => path.join(chrome.dir, f)).find((f) => fs.existsSync(f));
+      if (kit) return serveAsset(req, res, url, { kind: 'bundle', src: kit, root: chrome.dir });
+    }
+  }
+  return notFound();
+}
+
+// The module's API lane, `/api/<ws>/<id>/…`: the gate's two checks, then the module's process (or, for the gate's own
+// routes, the in-process router). Returns true when it answered.
+async function serveApiLane(req, res, url, apiUser, metaByQId) {
+  const seg = url.pathname.split('/');            // ['', 'api', <ws>, <id>, …]
+  const reqQid = seg[2] && seg[3] ? `${seg[2]}/${seg[3]}` : null;
+  const auth = findAuthModule();
+  const authQid = auth?.m.qualifiedId;
+  const isInfra = reqQid != null && chromeQids(metaByQId).includes(reqQid);
+  if (reqQid && authQid && reqQid !== authQid && !isInfra) {
+    if (!userModuleSet(apiUser).has(reqQid)) {
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'forbidden' }));
+      return true;
+    }
+    if (typeof auth.plug.authorize === 'function') {
+      req.json = () => bodyOf(req);   // memoized — the handler shares this parse
+      const modPath = url.pathname.slice(`/api/${reqQid}`.length) || '/';
+      try {
+        const ok = await auth.plug.authorize(req, apiUser, {
+          qualifiedId: reqQid,
+          method: req.method,
+          path: modPath,
+        });
+        if (!ok) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'forbidden' }));
+          return true;
+        }
+      } catch (err) {
+        // A thrown authorize is a denial. It may carry a statusCode (e.g. a
+        // 413 from reading an oversized body) — honor it; default to 403.
+        const status = err.statusCode || 403;
+        if (!res.writableEnded) {
+          res.writeHead(status, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message || 'forbidden' }));
+        }
+        if (status >= 500) console.error(`  ! ${auth.m.qualifiedId}.authorize threw:`, err);
+        return true;
+      }
+    }
+  }
+
+  // A backend that failed to (re)load → a clear 500 on ITS OWN api lane only.
+  // Scoped to reqQid, so a broken backend never takes the rest of the instance
+  // down — other modules' APIs are untouched. Same actionable message the
+  // overlay shows. (`reqQid` null for `/api/` with no <ws>/<id> → skipped.)
+  if (reqQid && backendErrors.has(reqQid)) {
+    res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+    const be = backendErrors.get(reqQid);
+    res.end(JSON.stringify({ error: be.kind === 'crash' ? 'backend process ended' : 'backend failed to load', module: reqQid, message: be.message }));
+    return true;
+  }
+  // A backend process → forward, with what the shell decided: the user and the caller.
+  if (reqQid && backendProcs.has(reqQid)) {
+    await proxyToBackend(req, res, backendProcs.get(reqQid), { user: apiUser, caller: callerFor(req, apiUser) });
+    return true;
+  }
+  return false;
+}
+
 const server = http.createServer(async (req, res) => {
   if (OBSERVE) {
     totalRequests += 1;
@@ -2161,6 +2650,9 @@ const server = http.createServer(async (req, res) => {
 
   await mountPendingBackends();
 
+  // A module's own origin: that module, nothing of the shell.
+  if (isFrameHost(req)) { await serveFrameHost(req, res, url); return; }
+
   if (url.pathname === '/' || url.pathname === '/index.html') {
     await serveIndex(req, res);
     return;
@@ -2172,6 +2664,33 @@ const server = http.createServer(async (req, res) => {
   // (Visual styles live in the chrome module's bundle, not in /assets/.)
   if (url.pathname.startsWith('/assets/')) {
     await serveAsset(req, res, url);
+    return;
+  }
+
+  // The host's pages and, for its sign-in page before any session, the default chrome's stylesheet and kit: public,
+  // like the shell's own assets (the chrome is the look of the sign-in page, not a tenant's module).
+  if (HOST_PAGES) {
+    const pg = /^\/_atelier\/pages\/([a-z0-9-]+)\.js$/.exec(url.pathname);
+    if (pg) {
+      const src = ['.jsx', '.js'].map((e) => path.join(HOST_PAGES.dir, pg[1] + e)).find((f) => fs.existsSync(f));
+      if (!src) { res.writeHead(404); res.end('Not found'); return; }
+      await serveAsset(req, res, url, { kind: 'jsx', src });
+      return;
+    }
+    if (HOST_PAGES.signIn) {
+      const chromeQid = resolveDefaultChromeQid(await getMetaByQId());
+      if (chromeQid && (url.pathname === `/modules/${chromeQid}/styles.css` || url.pathname === `/modules/${chromeQid}/kit.js`)) {
+        await serveAsset(req, res, url);
+        return;
+      }
+    }
+  }
+
+  // Hosted with a sign-in page: a page asked by nobody gets the host's sign-in page at that path (serveIndex decides),
+  // rather than the gate's bare 401 below.
+  if (HOST_PERSON && HOST_PAGES?.signIn && req.method === 'GET' && !/^\/(api|assets|modules|_atelier)\//.test(url.pathname)
+      && /^\/[a-zA-Z0-9][a-zA-Z0-9_-]*(?:\/[a-zA-Z0-9][a-zA-Z0-9_-]*(?:\/.*)?)?\/?$/.test(url.pathname)) {
+    await serveIndex(req, res);
     return;
   }
 
@@ -2226,6 +2745,7 @@ const server = http.createServer(async (req, res) => {
         const frame = JSON.stringify({ type: 'client-error', error, topic: 'shell' });
         for (const ws of wsClients) {
           if (ws.readyState !== 1) continue;
+          if (ws.frameQid) continue;
           if (qid && ws.allowed && !ws.allowed.has(qid)) continue;
           try { ws.send(frame); } catch { /* drop */ }
         }
@@ -2289,56 +2809,7 @@ const server = http.createServer(async (req, res) => {
   // which removes it from every rail and workspace.
   // Ungated instances skip this whole block — `findAuthModule()` is null, so
   // there's nothing to enforce.
-  if (url.pathname.startsWith('/api/')) {
-    const seg = url.pathname.split('/');            // ['', 'api', <ws>, <id>, …]
-    const reqQid = seg[2] && seg[3] ? `${seg[2]}/${seg[3]}` : null;
-    const auth = findAuthModule();
-    const authQid = auth?.m.qualifiedId;
-    const isInfra = reqQid != null && chromeQids(metaByQId).includes(reqQid);
-    if (reqQid && authQid && reqQid !== authQid && !isInfra) {
-      if (!userModuleSet(apiUser).has(reqQid)) {
-        res.writeHead(403, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'forbidden' }));
-        return;
-      }
-      if (typeof auth.plug.authorize === 'function') {
-        req.json = () => bodyOf(req);   // memoized — the handler shares this parse
-        const modPath = url.pathname.slice(`/api/${reqQid}`.length) || '/';
-        try {
-          const ok = await auth.plug.authorize(req, apiUser, {
-            qualifiedId: reqQid,
-            method: req.method,
-            path: modPath,
-          });
-          if (!ok) {
-            res.writeHead(403, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'forbidden' }));
-            return;
-          }
-        } catch (err) {
-          // A thrown authorize is a denial. It may carry a statusCode (e.g. a
-          // 413 from reading an oversized body) — honor it; default to 403.
-          const status = err.statusCode || 403;
-          if (!res.writableEnded) {
-            res.writeHead(status, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: err.message || 'forbidden' }));
-          }
-          if (status >= 500) console.error(`  ! ${auth.m.qualifiedId}.authorize threw:`, err);
-          return;
-        }
-      }
-    }
-
-    // A backend that failed to (re)load → a clear 500 on ITS OWN api lane only.
-    // Scoped to reqQid, so a broken backend never takes the rest of the instance
-    // down — other modules' APIs are untouched. Same actionable message the
-    // overlay shows. (`reqQid` null for `/api/` with no <ws>/<id> → skipped.)
-    if (reqQid && backendErrors.has(reqQid)) {
-      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ error: 'backend failed to load', module: reqQid, message: backendErrors.get(reqQid).message }));
-      return;
-    }
-  }
+  if (url.pathname.startsWith('/api/') && await serveApiLane(req, res, url, apiUser, metaByQId)) return;
 
   // API — `/api/<ws>/<id>/...`. Routes were registered with the same
   // prefix by `makeModuleScope`, so the dispatcher just matches by URL.
@@ -2391,7 +2862,16 @@ server.on('upgrade', async (req, socket, head) => {
   if (pathname !== '/_atelier/ws') { socket.destroy(); return; }
 
   await mountPendingBackends();
-  const user = await gateRequest(req, buildDefaultUser({ metaByQId: await getMetaByQId() }));
+  // On a module's own origin the channel carries that module's topic only (a remote module's too: nothing of this
+  // instance publishes on it).
+  let frameMod = isFrameHost(req) ? frameModuleFor(req) : null;
+  if (isFrameHost(req) && !frameMod && !HOST_SIDEBAR) { socket.destroy(); return; }
+  let user = await gateRequest(req, buildDefaultUser({ metaByQId: await getMetaByQId() }));
+  if (isFrameHost(req) && !frameMod) {
+    frameMod = remoteFrameFor(req, user);
+    if (!frameMod) { socket.destroy(); return; }
+  }
+  if (user && frameMod && (findAuthModule() || HOST_PERSON || HOST_SIDEBAR) && !userModuleSet(user).has(frameMod.qualifiedId)) user = null;
   if (!user) {
     try { socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n'); } catch {}
     socket.destroy();
@@ -2403,7 +2883,8 @@ server.on('upgrade', async (req, socket, head) => {
   // ws.authReq is kept so the socket can be re-validated periodically below.
   wss.handleUpgrade(req, socket, head, (ws) => {
     ws.user = user;
-    ws.allowed = allowedTopics(user);
+    ws.allowed = frameMod ? new Set([frameMod.qualifiedId]) : allowedTopics(user);
+    ws.frameQid = frameMod ? frameMod.qualifiedId : null;
     ws.authReq = req;
     wss.emit('connection', ws, req);
   });

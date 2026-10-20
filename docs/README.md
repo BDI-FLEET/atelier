@@ -57,6 +57,7 @@ An atelier instance is a **folder you run** — no launchd, no `~/.atelier/`. Th
 npx atelier                                # http://localhost:1844 (PORT= to override), hot reload
 npx atelier <id>                           # standalone — just one module
 npx atelier <workspace>/<id>               # standalone — a workspace module
+npx atelier help                           # the usage, one line per verb; a word that is no verb and no module folder here prints it, exit 2
 ```
 
 **As a subfolder** — a checkout of this repo at `<instance>/atelier/`:
@@ -86,6 +87,9 @@ A typical "production" folder sets something like `{ "hotReload": false, "auth":
 
 - `server.js` — runner, router, discovery, settings resolution (defaults ← config ← env), WebSocket multiplex (`/_atelier/ws`), hot-reload broadcaster, the auth slot, chrome-slot resolution.
 - `build.js` — build pipeline (esbuild JSX + Tailwind v4 + oxide).
+- `backend-host.js` — the process each module's backend runs in: mounts it with the scoped router and `ctx`, listens on a private socket the shell forwards to.
+- `frame.jsx` — the module's side of its frame, served on the module's own origin at `/_frame/frame.js`: `self`, `subscribe`, `useRoute`, the bridge.
+- `module-json.js` — reads a module's `module.json`.
 - `discovery.js` — discovery rules (reserved names, workspaces) + `atelier.config.json` parsing.
 - `index.html` — template; React + ReactDOM UMD. A single inline rule resets margins and hints `color-scheme`; the shell paints zero pixels (no favicon, theme-color, or icon library — those belong to the chrome).
 - `client.jsx` — slim router + bundle loader + error fallback. Loads the chrome bundle (`chromeQid` resolved server-side) and renders it as the root; wires the WS multiplex + `window.__atelier.self` / `.subscribe`.
@@ -128,6 +132,8 @@ All optional; resolved **defaults ← config ← environment** (env wins, so a P
 | `auth` | `false` | `ATELIER_AUTH` | path/id of the auth module, or `false` to run ungated (see [AUTH.md](./AUTH.md)) |
 | `revalidateMs` | `30000` | `ATELIER_REVALIDATE_MS` | how often live WebSocket sockets re-run `authenticate` (only when `auth` is set) — so logout/permission changes propagate without a reconnect; see [AUTH.md](./AUTH.md) |
 | `label` | `null` | `ATELIER_LABEL` | optional instance name a chrome may display |
+| `frameDomain` | `localhost` | `ATELIER_FRAME_DOMAIN` | the parent name of the modules' own origins. Each module is framed on `http://<id>.localhost:<port>` (a workspace module: `<id>.<workspace>.localhost`); on a machine reached by name, set it and point a wildcard name at the instance: `<id>.<frameDomain>`, scheme and port from `baseUrl`. See [the frame](./MODULES.md#the-frame--a-module-on-its-own-origin) |
+| `hosted` | _(none)_ | `ATELIER_HOSTED` | **the host switch**: a JS file, for a host that runs this shell behind itself. With it, the shell trusts the `X-Atelier-Caller` header the host sets after verifying the caller (base64url JSON; it becomes `ctx.caller`). The file may export `person(req)` → `{ person, name }` or nothing — *who the person is*, in place of the `auth` module; nothing answers `401` — and `sidebar(req, person)` → `[{ id, name, icon, origin, workspace? }]` — *where the sidebar comes from*, in place of the modules found in the folder (`origin` is where that module's frame lives). `person()` may add `logout`, an address on this origin the chrome's Sign out posts to (it is not part of `ctx.caller`). And `pages` — *the host's own pages*, which are not modules and never frames: `{ '/path': { title, file, icon?, sidebar? }, …, signIn: { title, file } }`. Each page is also a sidebar entry, in the host's order and before the modules (handed to the chrome among `modules` as a primary item of the workspace on screen, its `qid` its path without the leading slash, so the chrome links it to its path; `icon` a lucide name, `file` by default), unless it says `sidebar: false`; so the way back to the host's Home never leaves the sidebar. A page is a React component, its file's default export, written like a module frontend (JSX transformed per file, React from the page, `@atelier/kit` from the chrome; files in one folder, served to anyone at `/_atelier/pages/<name>.js`, scanned for the chrome's classes). At its exact path the shell renders it in the chrome's content area (`active.element`, `active.title`), with props `{ user, path, navigate(path) }`; a host page wins over a workspace of the same name. `signIn` is shown, when `person()` says nobody, at whatever path was asked, inside the chrome kit's `AuthLayout`, with `{ signedIn() }` reloading that path (status 401, the chrome's stylesheet and kit then public, nothing of any module in the page). Without it: a plain instance, and the header is ignored. A file that does not load stops the start |
 | `installPath` | _(the instance folder)_ | — | `{ "modules": "<path>", "chromes": "<path>" }` — where `atelier add` places **new** module working copies, chromes separately (keep them in different repos under different agent rules); external installs are path-mounted into `modules:` automatically, and `update` finds them there. Tooling-only — the server ignores it |
 | `modules` | _(all run)_ | — | the module filter below |
 

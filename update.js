@@ -1,5 +1,9 @@
 #!/usr/bin/env node
-/* atelier update — bring installed modules up to their collection's latest cut.
+/* atelier update — pull a module's repository, or without a name every module
+ * that has a remote (modules-git.js); and bring modules installed from a
+ * collection up to its latest cut.
+ *
+ *   npx atelier update <module>                 git pull --ff-only in that clone
  *
  *   npx atelier update                          everything, across all subscriptions
  *   npx atelier update <collection>             one collection's installed modules
@@ -43,12 +47,14 @@ import {
   instanceModuleDirs, CLI_NAME,
 } from './collections.js';
 import { buildProblems } from './gate.js';
+import { updateModules } from './modules-git.js';
 
 const HOST_DIR = path.dirname(fileURLToPath(import.meta.url));
 const fail = (msg) => { console.error(`\natelier update: ${msg}\n`); process.exit(1); };
 
 /* ---- args ---------------------------------------------------------------- */
-const USAGE = `usage: atelier update [<collection>[/<module>]] [--merge | --overwrite]
+const USAGE = `usage: atelier update [module]                 pull a module's clone; every clone with a remote when none is named
+       atelier update [<collection>[/<module>]] [--merge | --overwrite]   bring a collection's modules up to its latest cut
        atelier update <collection>/<module> --continue   land a resolved .update-merge
        atelier update <collection>/<module> --abort      discard a staged merge
   --merge      when you have local edits: take the update with your edits on top
@@ -70,6 +76,17 @@ for (let i = 0; i < args.length; i++) {
 
 const ROOT = resolveRoot({ atelierRoot: process.env.ATELIER_ROOT, pwd: process.env.PWD, hostDir: HOST_DIR });
 console.log(`\n  instance: ${ROOT}`);
+
+/* ---- a module's repository (modules-git.js) ------------------------------------
+ * update <module> pulls that clone; update alone pulls every clone with a
+ * remote, then goes on to the collections below (if any are here). A name
+ * that is no clone here is a collection's: the collection form below.
+ * ---------------------------------------------------------------------------- */
+if (!mode && !cont && !abort) {
+  const r = updateModules(ROOT, target);
+  if (r && target) process.exit(r.code);
+  if (r && r.pulled && !listCollections(ROOT).length) process.exit(r.code);
+}
 
 /* ---- installed modules, by provenance ------------------------------------------
  * Sweeps everything the instance mounts — root folders, $<ws>/ folders, and

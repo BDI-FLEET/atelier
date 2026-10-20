@@ -23,149 +23,16 @@
  * ========================================================================= */
 
 import { resolveModuleChrome, missingChrome } from './chrome-resolve.js';
+import { wireWsBridge } from './ws-bridge.js';
 
 const { useState, useEffect, useRef } = React;
 
-/* =========================================================================
- * Shared WebSocket multiplex — one connection per tab, multiple topics.
- *
- * Frames are JSON `{ topic, ...event }`. Modules call:
- *   const unsub = window.__atelier.subscribe(topic, (event) => { … });
- *
- * Reconnects with exponential backoff. Emits `atelier:connection` window
- * events ('online' | 'offline' | 'unauthed') used by the chrome's banner.
- * ========================================================================= */
-(function wireWsBridge() {
-  if (typeof window === 'undefined') return;
-  if (window.__atelier?.subscribe) return;
-  window.__atelier = window.__atelier || {};
+// What a chrome's `loadedModules` reads: modules run in their frames, so the page loads no module bundle.
+const NO_MODULE_BUNDLES = Object.freeze({});
 
-  const subscribers = new Map();
-  let ws = null;
-  let backoff = 250;
-  let reconnectTimer = null;
-
-  const OFFLINE_GRACE_MS = 2500;
-  let connState = 'online';
-  let offlineTimer = null;
-  function setConnState(next) {
-    if (connState === next) return;
-    connState = next;
-    try {
-      window.dispatchEvent(new CustomEvent('atelier:connection', { detail: { state: next } }));
-    } catch {}
-  }
-
-  async function probeAuth() {
-    const r = await fetch('/_atelier/whoami', { cache: 'no-store', credentials: 'same-origin' });
-    return r.status;
-  }
-
-  function armOfflineTimer() {
-    if (offlineTimer) return;
-    offlineTimer = setTimeout(async () => {
-      offlineTimer = null;
-      if (ws && ws.readyState === 1) return;
-      try {
-        const status = await probeAuth();
-        if (status === 200) return;
-        if (status === 401) { setConnState('unauthed'); return; }
-        setConnState('offline');
-      } catch {
-        setConnState('offline');
-      }
-    }, OFFLINE_GRACE_MS);
-  }
-  function clearOfflineTimer() {
-    if (!offlineTimer) return;
-    clearTimeout(offlineTimer);
-    offlineTimer = null;
-  }
-
-  function dispatch(frame) {
-    const topic = frame?.topic;
-    if (!topic) return;
-    const fns = subscribers.get(topic);
-    if (!fns) return;
-    for (const fn of fns) {
-      try { fn(frame); } catch (err) {
-        console.warn('[atelier] subscribe handler threw:', err);
-      }
-    }
-  }
-
-  function connect() {
-    if (ws && (ws.readyState === 0 || ws.readyState === 1)) return;
-    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    try {
-      ws = new WebSocket(`${proto}//${window.location.host}/_atelier/ws`);
-    } catch {
-      armOfflineTimer();
-      scheduleReconnect();
-      return;
-    }
-    ws.onmessage = (m) => {
-      let frame;
-      try { frame = JSON.parse(m.data); } catch { return; }
-      dispatch(frame);
-    };
-    ws.onopen = () => {
-      backoff = 250;
-      clearOfflineTimer();
-      setConnState('online');
-    };
-    ws.onclose = () => {
-      ws = null;
-      armOfflineTimer();
-      scheduleReconnect();
-    };
-    ws.onerror = () => { /* close fires next */ };
-  }
-  function scheduleReconnect() {
-    clearTimeout(reconnectTimer);
-    reconnectTimer = setTimeout(connect, backoff);
-    backoff = Math.min(backoff * 2, 5000);
-  }
-
-  window.__atelier.subscribe = (topic, handler) => {
-    if (!topic || typeof handler !== 'function') return () => {};
-    let set = subscribers.get(topic);
-    if (!set) { set = new Set(); subscribers.set(topic, set); }
-    set.add(handler);
-    if (!ws) connect();
-    return () => {
-      const s = subscribers.get(topic);
-      if (!s) return;
-      s.delete(handler);
-      if (s.size === 0) subscribers.delete(topic);
-    };
-  };
-
-  // Workspace-aware self-identity for a module frontend. Pass `import.meta.url`
-  // and get back the module's qualifiedId (`<ws>/<id>`, `global` the default),
-  // its WS topic, and its API base — all derived from where the module is
-  // actually mounted, so the SAME module works in any workspace without
-  // hardcoding it. This mirrors how backend routes are workspace-scoped:
-  //
-  //   const self = window.__atelier.self(import.meta.url);
-  //   self.subscribe((frame) => { … });        // listens on '<ws>/<id>' — never hardcode
-  //   fetch(self.api + '/items');                // hits /api/<ws>/<id>/items
-  window.__atelier.self = (metaUrl) => {
-    let qid = '';
-    try { qid = new URL('.', metaUrl).pathname.replace(/^\/modules\//, '').replace(/\/+$/, ''); } catch {}
-    const [workspace = '', id = ''] = qid.split('/');
-    return {
-      workspace,
-      id,
-      qid,
-      topic: qid,
-      api: qid ? '/api/' + qid : '',
-      subscribe: (handler) => window.__atelier.subscribe(qid, handler),
-    };
-  };
-
-  connect();
-})();
+// The real-time channel and `self` (ws-bridge.js); the host's sign-in page has no session, so no channel.
+window.__atelier = window.__atelier || {};
+if (!window.__ATELIER__?.signedOut) wireWsBridge({ watch: true });
 
 /* =========================================================================
  * URL routing — every URL is workspace-qualified.
@@ -297,8 +164,7 @@ window.__atelier.useRoute = () => {
  * (workspace-qualified — same id in different workspaces gets distinct
  * URLs and distinct browser cache entries). Returns the namespace plus a
  * handful of well-known shape flags (default export → rendered module;
- * TopBarCenter → topbar slot claimer; chrome → chrome slot claimer; meta →
- * icon/name/group).
+ * chrome → chrome slot claimer; meta → icon/name/group).
  * ========================================================================= */
 async function loadModuleBundle(qid, bust) {
   // `bust` (a monotonic token) is appended only when re-importing a changed
@@ -310,12 +176,10 @@ async function loadModuleBundle(qid, bust) {
   try {
     const mod = await import(url);
     const Module = typeof mod.default === 'function' ? mod.default : null;
-    const TopBarCenter = typeof mod.TopBarCenter === 'function' ? mod.TopBarCenter : null;
     const ChromeFn = typeof mod.chrome === 'function' ? mod.chrome : null;
     return {
       status: 'ok',
       Module,
-      TopBarCenter,
       chrome: ChromeFn,
       hasDefault: !!Module,
       meta: mod.meta || {},
@@ -361,10 +225,178 @@ function flattenUserModules(user) {
         workspace: ws.id,
         hasFrontend: m.hasFrontend !== false,
         meta: m.meta || {},
+        // Where its frame lives: a host's sidebar may name it; else this instance's own origin for the module.
+        origin: m.origin || (window.__ATELIER__?.frames || {})[`${ws.id}/${m.id}`] || null,
       });
     }
   }
   return out;
+}
+
+/* =========================================================================
+ * The frame — every module on its own origin.
+ *
+ * The module runs in an <iframe> on its own origin (window.__ATELIER__.frames, or a host's sidebar entry), so it
+ * cannot read this page, the sidebar or another frame. The bridge is postMessage with the exact origin both ways:
+ *   to the frame:   init { route, href, title, theme } · route { route, href } · theme { theme } · dim { on }
+ *   from the frame: ready · route { route, replace } · title { title } · key { ⌘K or Esc, pressed in the frame }
+ * This page owns the history: a route from the frame becomes a pushState here; back/forward goes down as a route.
+ * The chrome renders the frame where it rendered the module; nothing in the chrome changes.
+ * ========================================================================= */
+const themeNow = () => (document.documentElement.classList.contains('dark') ? 'dark' : 'light');
+
+function ModuleFrame({ qid, origin, route, title, onTitle }) {
+  const ref = useRef(null);
+  const [height, setHeight] = useState(null);
+  const [theme, setTheme] = useState(themeNow);
+  const [ws, id] = qid.split('/');
+  // The first address only; later routes travel by the bridge (a new src would reload the module).
+  const src = React.useMemo(() => {
+    const u = new URL(buildUrl(ws, id, route), origin);
+    u.searchParams.set('atelier-parent', window.location.origin);
+    return u.href;
+  }, [qid, origin]);
+  const routeRef = useRef(route);
+  routeRef.current = route;
+  const post = (type, data) => {
+    const w = ref.current?.contentWindow;
+    if (w) w.postMessage({ atelier: type, ...data }, origin);
+  };
+
+  // Messages from the frame: only from this frame's window, only from its origin.
+  useEffect(() => {
+    const onMsg = (e) => {
+      if (!ref.current || e.source !== ref.current.contentWindow || e.origin !== origin) return;
+      const d = e.data;
+      if (!d || typeof d !== 'object' || typeof d.atelier !== 'string') return;
+      if (d.atelier === 'ready') {
+        post('init', { route: routeRef.current, href: window.location.href, title, theme: themeNow() });
+      } else if (d.atelier === 'route' && typeof d.route === 'string') {
+        const target = buildUrl(ws, id, d.route);
+        if (target !== window.location.pathname) {
+          window.history[d.replace ? 'replaceState' : 'pushState'](null, '', target);
+          window.dispatchEvent(new CustomEvent('atelier:route'));
+        }
+      } else if (d.atelier === 'title' && typeof d.title === 'string') {
+        onTitle?.(d.title.slice(0, 200));
+      } else if (d.atelier === 'key' && (d.key === 'Escape' || d.key === 'k' || d.key === 'K')) {
+        // Handed to this page as if pressed here: the chrome's ⌘K palette, a dialog's Esc.
+        document.dispatchEvent(new KeyboardEvent('keydown', {
+          key: d.key, metaKey: !!d.metaKey, ctrlKey: !!d.ctrlKey, shiftKey: !!d.shiftKey, altKey: !!d.altKey,
+          bubbles: true, cancelable: true,
+        }));
+      }
+    };
+    window.addEventListener('message', onMsg);
+    return () => window.removeEventListener('message', onMsg);
+  }, [qid, origin, title]);
+
+  // Back/forward or a deep link changed the route here → down to the frame.
+  useEffect(() => { post('route', { route, href: window.location.href }); }, [route]);
+
+  // The theme follows the page's: the chrome marks it on <html>.
+  useEffect(() => {
+    let last = themeNow();
+    const mo = new MutationObserver(() => { const t = themeNow(); if (t !== last) { last = t; setTheme(t); post('theme', { theme: t }); } });
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    return () => mo.disconnect();
+  }, [origin]);
+
+  // Dim for a modal: a dialog of the page makes the rest inert (or aria-hidden); the frame is told.
+  useEffect(() => {
+    let last = false;
+    const check = () => {
+      const on = !!ref.current?.closest('[inert],[aria-hidden="true"]');
+      if (on !== last) { last = on; post('dim', { on }); }
+    };
+    const mo = new MutationObserver(check);
+    mo.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['inert', 'aria-hidden'] });
+    return () => mo.disconnect();
+  }, [origin]);
+
+  // The frame fills the content area down to the bottom of the window; the module scrolls inside it.
+  React.useLayoutEffect(() => {
+    const measure = () => {
+      const el = ref.current;
+      if (!el) return;
+      let below = 0;
+      for (let n = el.parentElement; n && n !== document.body; n = n.parentElement) {
+        const cs = getComputedStyle(n);
+        below += parseFloat(cs.paddingBottom) + parseFloat(cs.borderBottomWidth);
+      }
+      const top = el.getBoundingClientRect().top + window.scrollY;
+      setHeight(Math.max(240, Math.floor(window.innerHeight - top - below)));
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    const ro = new ResizeObserver(measure);
+    ro.observe(document.body);
+    return () => { window.removeEventListener('resize', measure); ro.disconnect(); };
+  }, [qid]);
+
+  return React.createElement('iframe', {
+    ref,
+    src,
+    title: title || qid,
+    'data-atelier-frame': qid,
+    style: { display: 'block', width: '100%', height: height ? `${height}px` : '70vh', border: 0, background: 'transparent', colorScheme: theme },   // the frame's scheme, so its page stays see-through
+  });
+}
+
+/* =========================================================================
+ * The host's pages — pages are the host's own, apps are frames. A page is the host's React component (its file's
+ * default export, JSX transformed per file like a module frontend, React from this page, `@atelier/kit` from the
+ * chrome), rendered here, in the page, inside the chrome's content area. Props: { user, path, navigate(path) }.
+ * ========================================================================= */
+const hostPageCache = new Map();   // src → Promise<component>
+function loadHostPage(src) {
+  if (!hostPageCache.has(src)) hostPageCache.set(src, import(src).then((m) => {
+    if (typeof m.default !== 'function') throw new Error(`${src} has no default export`);
+    return m.default;
+  }));
+  return hostPageCache.get(src);
+}
+/**
+ * The host's pages as sidebar entries, Home first: each page the host did not mark `sidebar: false`, in the host's
+ * order, as a rail item of the workspace on screen, its qid its path without the leading slash (the chrome links an
+ * item to `/<qid>`: Home's is ''), `meta.primary` so a chrome that puts primary items first puts them before the apps,
+ * `page` its path. Never a module, never a frame: navigate() takes a page's qid to its path.
+ */
+function pageEntries(workspace) {
+  return (window.__ATELIER__?.pages || []).filter((p) => p.sidebar !== false).map((p, i) => ({
+    id: `page:${p.path}`, qid: p.path.slice(1), workspace: workspace || '', hasFrontend: true, origin: null, page: p.path,
+    meta: { name: p.title, icon: p.icon || 'file', primary: true, order: i },
+  }));
+}
+/** The host page for a path, from the bootstrap: an exact match ('/x/' is '/x'). */
+function hostPageFor(pathname) {
+  const p = pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname;
+  return (window.__ATELIER__?.pages || []).find((x) => x.path === p) || null;
+}
+function HostPage({ page, props }) {
+  const [state, setState] = useState({ kind: 'loading' });
+  useEffect(() => {
+    let live = true;
+    setState({ kind: 'loading' });
+    loadHostPage(page.src).then((C) => { if (live) setState({ kind: 'ok', C }); }, (err) => { if (live) setState({ kind: 'error', err }); });
+    return () => { live = false; };
+  }, [page.src]);
+  if (state.kind === 'loading') return null;
+  if (state.kind === 'error') return React.createElement('pre', { style: { whiteSpace: 'pre-wrap' } }, `${page.path || 'page'} · failed to load\n${state.err?.message || state.err}`);
+  return React.createElement(state.C, props);
+}
+
+/** Nobody signed in, hosted: the host's sign-in page in the chrome's AuthLayout (from its kit), at the asked path. */
+function SignedOut() {
+  const page = window.__ATELIER__.signIn;
+  const [Layout, setLayout] = useState(null);
+  useEffect(() => {
+    document.title = `${page.title} — Atelier`;
+    import('@atelier/kit').then((k) => setLayout(() => (typeof k.AuthLayout === 'function' ? k.AuthLayout : 'main')), () => setLayout(() => 'main'));
+  }, []);
+  if (!Layout) return null;
+  // signed in: the asked page again, now with a person
+  return React.createElement(Layout, null, React.createElement(HostPage, { page, props: { user: null, path: window.location.pathname, navigate: (to) => window.location.assign(to), signedIn: () => window.location.reload() } }));
 }
 
 /* =========================================================================
@@ -502,43 +534,10 @@ class ChromeErrorBoundary extends React.Component {
   }
 }
 
-// Per-module render-crash boundary, owned by the shell so every chrome gets it.
-// A module that throws WHILE RENDERING (the common case while an agent is mid-
-// edit) is caught here — isolated to its own subtree, surfaced as a dev overlay,
-// never crashing the chrome or sibling modules. Crucially it RESETS when the
-// module's code hot-swaps: the shell passes the live module component as
-// `moduleType`, and a hot-swap re-imports it into a NEW function identity, so
-// the moment the crash is fixed the new code renders — no manual reload. (This
-// inner boundary catches before any boundary the chrome wraps modules in; a
-// chrome boundary that only reset on navigation used to leave a render crash
-// stuck until you navigated away or hard-refreshed.)
-class ModuleCrashBoundary extends React.Component {
-  constructor(props) { super(props); this.state = { err: null }; }
-  static getDerivedStateFromError(err) { return { err }; }
-  componentDidCatch(err, info) { console.error(`[atelier] module '${this.props.qid}' render crashed:`, err, info?.componentStack || ''); }
-  componentDidUpdate(prev) {
-    // New module component identity (hot-swap, or navigation to another module)
-    // → clear the crash so the fresh code gets a chance to render. If it still
-    // throws, getDerivedStateFromError catches it again — no loop.
-    if (this.state.err && prev.moduleType !== this.props.moduleType) this.setState({ err: null });
-  }
-  render() {
-    if (!this.state.err) return this.props.children;
-    const mono = 'ui-monospace, SFMono-Regular, Menlo, monospace';
-    const msg = (this.state.err && (this.state.err.stack || this.state.err.message)) || String(this.state.err);
-    return React.createElement('div', { style: { padding: 24, colorScheme: 'dark', font: `13px/1.6 ${mono}` } },
-      React.createElement('div', { style: { maxWidth: 820, background: '#0a0a0a', color: '#ededed', border: '1px solid #2a2a2a', borderRadius: 12, overflow: 'hidden' } },
-        React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 10, padding: '14px 20px', borderBottom: '1px solid #2a2a2a' } },
-          React.createElement('span', { style: { padding: '2px 8px', borderRadius: 6, fontWeight: 600, fontSize: 11, background: 'rgba(248,113,113,0.12)', color: '#f87171', border: '1px solid rgba(248,113,113,0.4)', textTransform: 'uppercase', letterSpacing: '.05em' } }, 'Render Error'),
-          React.createElement('span', { style: { color: '#a1a1a1' } }, this.props.qid || '')),
-        React.createElement('pre', { style: { margin: 0, padding: '18px 20px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, msg),
-        React.createElement('div', { style: { padding: '10px 20px', borderTop: '1px solid #2a2a2a', color: '#7a7a7a', fontSize: 12 } }, 'Clears automatically when the module renders without throwing.')));
-  }
-}
-
 function App() {
   // Auth module's handleUnauth took over → render only its bundle, no chrome.
   if (window.__ATELIER__?.takeover) return React.createElement(Takeover);
+  if (window.__ATELIER__?.signedOut) return React.createElement(SignedOut);
 
   const boot = window.__ATELIER__ || { mode: 'host', user: { id: 'local', workspaces: [] } };
   const user = boot.user || { id: 'local', workspaces: [] };
@@ -555,7 +554,6 @@ function App() {
   const availableChromes = boot.chromes || [];
 
   const [urlState, setUrlState] = useState(parseUrl);
-  const [loaded, setLoaded] = useState({});            // qid → load entry
   const [chromeEntry, setChromeEntry] = useState(null); // load entry for chrome
   const [backendErrors, setBackendErrors] = useState(() => boot.backendErrors || []);
 
@@ -569,8 +567,10 @@ function App() {
 
   // Canonicalize URL: with no workspace in the path (`/`), land on the default
   // workspace — its `meta.primary` module if any, else its home.
+  // A host page at this path: the host's own, shown in the content area; the URL stays as it is.
+  const hostPage = hostPageFor(window.location.pathname);
   useEffect(() => {
-    if (urlState.ws || !defaultWs) return;
+    if (hostPage || urlState.ws || !defaultWs) return;
     const primary = allModules.find((m) => m.workspace === defaultWs && m.meta?.primary)
                  || allModules.find((m) => m.meta?.primary);
     const target = primary
@@ -585,7 +585,7 @@ function App() {
     window.history.replaceState(null, '', target);
     setUrlState(parseUrl());
   }, [urlState.ws]);
-  const effectiveWorkspace = urlState.ws || defaultWs;
+  const effectiveWorkspace = hostPage ? defaultWs : (urlState.ws || defaultWs);
 
   // Load the chrome bundle.
   useEffect(() => {
@@ -598,21 +598,8 @@ function App() {
     return () => { cancelled = true; };
   }, [chromeQid]);
 
-  // Bundle loading is LAZY: a page load costs the chrome plus the module being
-  // viewed, not the whole instance. The one exception is modules that declared
-  // `meta.eager` — they contribute UI or listeners to every page (a topbar
-  // slot claimer must set it, or its slot never renders), so they load at boot,
-  // in parallel. Everything else loads on first visit and stays loaded for the
-  // rest of the SPA session. `loadingRef` dedupes across effects and re-renders.
-  const loadingRef = React.useRef(new Set());
-  const loadOne = (qid) => {
-    if (!qid || loadingRef.current.has(qid)) return;
-    loadingRef.current.add(qid);
-    loadModuleBundle(qid).then((res) => setLoaded((l) => ({ ...l, [qid]: res })));
-  };
-  useEffect(() => {
-    for (const m of allModules) if (m.hasFrontend && m.meta?.eager) loadOne(m.qid);
-  }, []);
+  // Modules run in their frames: the page imports no module code, eager or not; the chrome reads names and icons
+  // from the server's meta (module.json, then the frontend's `meta`).
 
   // popstate / programmatic sub-route nav → re-parse URL. `atelier:route` is
   // fired by window.__atelier.navigate; ws+id are unchanged on a sub-route nav,
@@ -636,9 +623,8 @@ function App() {
 
   // Lazy half of the loading strategy: the module being viewed loads on
   // demand — initial landing and every SPA navigation to a first visit.
-  useEffect(() => {
-    if (activeMod?.hasFrontend) loadOne(activeMod.qid);
-  }, [activeQid]);
+  const [frameTitle, setFrameTitle] = useState(null);
+  useEffect(() => { setFrameTitle(null); }, [activeQid]);
 
   // URL points somewhere that doesn't exist → tidy back to a real place.
   //   • /<ws>/<id> with no such module → workspace home (if the ws exists) else root.
@@ -647,6 +633,7 @@ function App() {
   // lets the canonicalization effect above land on the default (global)
   // workspace's primary module or home.
   useEffect(() => {
+    if (hostPage) return;
     const wsExists = wsList.some((w) => w.id === urlState.ws);
     if (urlState.id === null) {
       if (!urlState.ws || wsExists) return;
@@ -678,7 +665,6 @@ function App() {
   // full reload did, now scoped to the one module. Preserving state across an
   // edit would need react-refresh machinery in the build, which the shell
   // deliberately omits.
-  const bustRef = useRef(new Map());   // qid → latest cache-bust token
   useEffect(() => {
     const unsub = window.__atelier?.subscribe?.('shell', (frame) => {
       if (frame.type === 'backend-error') {
@@ -701,25 +687,9 @@ function App() {
         window.location.reload();
         return;
       }
+      // A module the bootstrap never saw needs discovery to re-run. A known module reloads inside its own frame,
+      // which hears its reload on its own channel: nothing to do here.
       if (!allModules.some((m) => m.qid === id)) { window.location.reload(); return; }
-      // Never imported in this document (lazy loading) → nothing to swap; its
-      // first visit imports fresh code anyway. The stylesheet may still need
-      // the edit's new classes, so refresh that half only.
-      if (!loadingRef.current.has(id)) { refreshChromeStyles(); return; }
-      // Known module: re-import its bundle in the background, then merge it.
-      // The token guards against an out-of-order resolution clobbering newer
-      // code if two edits land close together.
-      const token = (bustRef.current.get(id) || 0) + 1;
-      bustRef.current.set(id, token);
-      loadModuleBundle(id, token).then((res) => {
-        if (bustRef.current.get(id) !== token) return;   // superseded by a newer edit
-        setLoaded((l) => ({ ...l, [id]: res }));
-      });
-      // Re-fetch the chrome stylesheet so any Tailwind class the edit newly
-      // introduced is generated and applied (the JS swap alone wouldn't bring
-      // it in). Runs for inactive edits too, so the CSS is ready before an SPA
-      // navigation — which also never re-fetches the stylesheet.
-      refreshChromeStyles();
     });
     return () => { try { unsub?.(); } catch {} };
   }, [chromeQid]);
@@ -734,7 +704,7 @@ function App() {
     const [ws, id] = (qid || '').split('/');
     if (!ws || !id) return defaultChromeQid;          // workspace home / none → default
     const m = allModules.find((x) => x.qid === qid);
-    return chromeForMeta((loaded[qid]?.meta) || m?.meta || {});
+    return chromeForMeta(m?.meta || {});
   }
   // If a module pins a chrome (meta.chrome) that ISN'T installed, return that
   // chrome's name so we render a clear error instead of silently using the
@@ -743,7 +713,7 @@ function App() {
     const [ws, id] = (qid || '').split('/');
     if (!ws || !id) return null;
     const m = allModules.find((x) => x.qid === qid);
-    const chrome = ((loaded[qid]?.meta) || m?.meta || {}).chrome;
+    const chrome = (m?.meta || {}).chrome;
     return missingChrome(chrome, availableChromes);
   }
 
@@ -757,6 +727,9 @@ function App() {
   }
 
   function navigateByQid(qid) {
+    // a host page's entry: its path
+    const page = (window.__ATELIER__?.pages || []).find((p) => p.path.slice(1) === qid);
+    if (page) { navigateTo(page.path); return; }
     const [ws, id] = qid.split('/');
     if (!ws) return;
     // Workspace follows the URL: navigating to any module — global or not —
@@ -798,10 +771,17 @@ function App() {
   const Chrome = chromeEntry.chrome;
 
   // Compose active-module state for chrome.
-  const entry = activeMod ? loaded[activeMod.qid] : null;
   const missingChromeName = activeMod ? pinnedChromeMissing(activeMod.qid) : null;
   let active;
-  if (!activeMod) {
+  if (hostPage && !activeMod) {
+    // the host's page: not a module, not a frame; `title` for a chrome that shows it
+    active = {
+      kind: 'ready',
+      qid: null,
+      title: hostPage.title,
+      element: React.createElement(HostPage, { key: hostPage.path, page: hostPage, props: { user, path: hostPage.path, navigate: navigateTo } }),
+    };
+  } else if (!activeMod) {
     active = { kind: 'none' };
   } else if (missingChromeName) {
     // A module that pins an uninstalled chrome is an error, not a fallback.
@@ -814,20 +794,22 @@ function App() {
         `chrome module), or remove meta.chrome to use the default chrome.`
       ),
     };
-  } else if (!entry) {
-    active = { kind: 'loading', qid: activeMod.qid };
-  } else if (entry.status === 'error') {
-    active = { kind: 'error', qid: activeMod.qid, err: entry.err };
-  } else if (!entry.Module) {
-    active = { kind: 'error', qid: activeMod.qid, err: new Error('no default export') };
+  } else if (!activeMod.origin) {
+    active = { kind: 'error', qid: activeMod.qid, err: new Error('this module has no frame origin') };
   } else {
-    const M = entry.Module;
-    // Wrap in the shell's crash boundary, keyed on the module component so a
-    // hot-swap (new M identity) resets a stuck render error — see ModuleCrashBoundary.
+    // The module in its frame, on its own origin. `title` is what the frame gave (additive; a chrome may show it).
     active = {
       kind: 'ready',
       qid: activeMod.qid,
-      element: React.createElement(ModuleCrashBoundary, { qid: activeMod.qid, moduleType: M }, React.createElement(M)),
+      title: frameTitle,
+      element: React.createElement(ModuleFrame, {
+        key: activeMod.qid,
+        qid: activeMod.qid,
+        origin: activeMod.origin,
+        route: urlState.rest,
+        title: activeMod.meta?.name || activeMod.id,
+        onTitle: setFrameTitle,
+      }),
     };
   }
 
@@ -836,12 +818,12 @@ function App() {
       React.createElement(Chrome, {
         boot,
         user,
-        modules: allModules,
+        modules: [...pageEntries(effectiveWorkspace), ...allModules],
         workspaces: wsList,
         workspace: effectiveWorkspace || '',
-        activeQid,
+        activeQid: hostPage && !activeMod ? hostPage.path.slice(1) : activeQid,
         active,
-        loadedModules: loaded,
+        loadedModules: NO_MODULE_BUNDLES,
         navigate: navigateByQid,
         pickWorkspace,
       })),

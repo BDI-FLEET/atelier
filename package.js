@@ -36,7 +36,8 @@ const HOST_DIR = path.dirname(fileURLToPath(import.meta.url));
 const fail = (msg) => { console.error(`\natelier package: ${msg}\n`); process.exit(1); };
 
 /* ---- args ---------------------------------------------------------------- */
-const USAGE = `usage: atelier package <module> [--to <collection>] [--data] [--yes] [--no-chrome]
+const USAGE = `atelier package cuts a checked snapshot of a module into a collection.
+usage: atelier package <module> [--to <collection>] [--data] [--yes] [--no-chrome]
   <module>      a module in this instance: <id>, or <ws>/<id> for a workspace module
   --to          the collection to cut into (default: a collection named after the module)
   --data        include the module's data/ in the cut (content ships; point-in-time)

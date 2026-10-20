@@ -17,6 +17,7 @@ The shell discovers modules by walking the instance root (and one level into eac
 | `data/` | Per-module **runtime state** (`<module>/data/`) — never served to clients, ignored by the hot-reload watcher, never touched by the shell. |
 | `node_modules/` | A module's own **dependencies** — resolved at runtime, never served, ignored by the watcher. |
 | `package.json` | A module's deps manifest (optional — only if it imports npm packages). |
+| `module.json` | The module's **declaration** (optional) — see [module.json](#modulejson--the-declaration). |
 | `.claude/` | The module's **definitional content** (skills, commands, hooks) — travels with the folder; the shell doesn't read it. |
 | `kit.js` / `kit.jsx` | **Chrome only** — a chrome publishing `@atelier/kit` (see [the chrome](#special-module-the-chrome)). |
 | `styles.css` | **Chrome only** — the chrome's design tokens, injected via `<link>` (the shell ships none). |
@@ -35,6 +36,62 @@ export default function Module() {
   return <div className="p-8">hello</div>;
 }
 ```
+
+### module.json — the declaration
+
+The declaration every app carries; unknown keys are ignored and reported. A module may carry a `module.json` beside its files:
+
+```json
+{ "name": "Reading list", "icon": "book-open", "group": "tools", "color": "teal", "primary": false,
+  "release": "node migrate.js", "agent": { "tools": ["add_item"], "teaching": "AGENT.md" } }
+```
+
+| key | meaning |
+|---|---|
+| `name` | The name in the sidebar and the title. Up to 64 characters. |
+| `icon` | An icon name, or an emoji. Drawn by the frame, never imported by the app. |
+| `group`, `color` | A heading the sidebar may group under; the app's accent. |
+| `primary` | A request to land on this app when its place opens. |
+| `release` | One shell command the host runs at a push, before the switch. Read, not run, by a local instance. |
+| `agent` | `{ tools, teaching }`: the calls the agent gets, and one page on when to use them. `tools` names them (lower case, digits, underscores); `teaching` is a file in the module's folder. Read, not acted on, by a local instance. See *Tools: the calls an agent gets*, below. |
+
+`atelier start` reads it with the module's `meta`: `name`, `icon`, `group`, `color` and `primary` from `module.json` win where present, so the chrome draws them. An unknown key, or a value of the wrong kind, is ignored and reported once per edit (`! global/kb/module.json: unknown key "colour", ignored`). **Without a `module.json` a module runs on its `meta`** (below), which is all there is. A folder is a module only when it has a `frontend.jsx` or a `backend.js`.
+
+### Tools: the calls an agent gets
+
+A module can be a tool for an agent as well as an app for people. Behind a host, when someone lets their agent use the app ("Let the agent use Notes"), each tool it declares is mounted into that agent's sandbox, and the agent can call it; the call reaches the module through the host, never straight from the agent. Three pieces:
+
+1. **`module.json` declares them**: `"agent": { "tools": ["add_note", "list_notes"], "teaching": "AGENT.md" }`. A module without `agent.tools` has no tools.
+2. **`AGENT.md` says when** to use them: one short page, written to the agent. It reaches the agent with the tools.
+3. **`backend.js` implements them**, as a second export beside `mountRoutes`:
+
+```js
+export default {
+  tools(ctx) {
+    return {
+      add_note: {
+        description: 'Add a short note to the shared list everyone in this chat sees.',
+        input: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] },   // JSON Schema
+        async run({ text }) {
+          const who = ctx.caller            // { persona, name, sandbox, chat, word? }: the agent that called, and for whom, as the host verified it
+          // … do it, under ctx.dataDir like any route …
+          return 'noted'                    // any JSON value: what the agent gets back
+        },
+      },
+    }
+  },
+  mountRoutes(router, ctx) { /* the app's own routes, unchanged */ },
+}
+```
+
+`run(args)` gets the arguments as one object and returns any JSON value. `ctx.caller` is the agent's caller: `{ persona, name, sandbox, chat, word? }` (a person's frame gives `{ person, name }`). `word` is `{ person, name }`, the person whose chat message the agent made the call for, when it named one: the host proved that message is theirs, in that chat, and recent. Absent, the agent named nobody. The app decides what that person may do: Notes files the note as theirs, filed by the agent. Throw an `Error` with a `statusCode` (`400`, `403`, `404`) to refuse a call with that sentence; anything else that throws is a `500` with its message. A name declared and not implemented, or implemented and not declared, is reported at start and not served. `tools(ctx)` is called once, when the module starts.
+
+Where it runs: `module-serve.js` (the process a host's computer runs for one module) serves the declared tools on its socket, to its computer only:
+
+- `GET /api/<ws>/<id>/tools` → `{ tools: [{ name, description, input }], teaching }`, read once the module listens, and reported to the host as what the module offers;
+- `POST /api/<ws>/<id>/tools/<name>` with the arguments → `200 { result }` or `4xx/500 { error }`. A caller without `sandbox` (a person's frame) is refused `403`; the computer's address never serves these paths to a frame anyway.
+
+A local instance (`atelier start`) reads the declaration and does nothing with it: there is no agent to mount it into.
 
 **Optional metadata** — `export const meta`:
 
@@ -68,9 +125,38 @@ export default {
 };
 ```
 
-`ctx` exposes exactly: `id`, `name`, `workspace`, `qualifiedId` (`'<workspace>/<id>'`), `label`, `port`, `host`, `baseUrl`, `dataDir`, `log`, `broadcast`, `module` — and nothing else (no CORS or auth helpers; a module that needs CORS sets its own response headers). URLs you return in response bodies — for clients to follow — should be built off the module's mount point (`/api/${ctx.qualifiedId}/...`), never hardcoded. A module that opens its own listener (a sidecar) should bind `ctx.host` (also published as `process.env.HOST`) so it's never more exposed than the instance itself — that pattern, plus reader-relative links and frontends reaching sidecar ports, is in [Recipes](./RECIPES.md).
+`ctx` exposes exactly: `id`, `name`, `workspace`, `qualifiedId` (`'<workspace>/<id>'`), `label`, `port`, `host`, `baseUrl`, `dataDir`, `log`, `broadcast`, `module`, `caller` — and nothing else (no CORS or auth helpers; a module that needs CORS sets its own response headers). URLs you return in response bodies — for clients to follow — should be built off the module's mount point (`/api/${ctx.qualifiedId}/...`), never hardcoded. A module that opens its own listener (a sidecar) should bind `ctx.host` (also published as `process.env.HOST`) so it's never more exposed than the instance itself — that pattern, plus reader-relative links and frontends reaching sidecar ports, is in [Recipes](./RECIPES.md).
 
-The router gives handlers `req.params`, `req.query`, `req.json()` (memoized, async; rejects with a `413` past a 10 MB body cap), `req.user` (see [AUTH.md](./AUTH.md)), and `res.json(data, status?)`.
+The router gives handlers `req.params`, `req.query`, `req.json()` (memoized, async; reads a body only when it says `content-type: application/json`, else rejects with a `415`; rejects with a `413` past a 10 MB body cap), `req.user` (see [AUTH.md](./AUTH.md)), and `res.json(data, status?)`.
+
+### Who is calling — `ctx.caller`
+
+A backend reads who is calling from `ctx.caller` and applies its own rules to its own data/; it never authenticates anyone, it judges. Read `ctx.caller` inside a handler (it is per request; outside one it is `null`):
+
+```js
+router.get('/notes', (req, res) => {
+  const who = ctx.caller            // { person, name, … } or null
+  res.json(notes.filter((n) => n.owner === who?.person))
+})
+```
+
+What it holds depends on where the instance runs, and is never more than who is calling:
+
+- **A plain instance, ungated:** `null`. Nobody was verified.
+- **A plain instance with an `auth` module:** `{ person, name }` from the user the gate resolved.
+- **Hosted** (the [`hosted`](./README.md#settings) setting): what the host verified in front of the shell — the `X-Atelier-Caller` header (base64url JSON, set by the host after it verified the caller), else the host's `person(req)` answer. Without the setting the header is ignored and removed before the request reaches the module, so it cannot be spoofed.
+- **On a host's computer** (`module-serve.js`, behind the computer's address): for a person's frame, `{ person, name, via }`, where `via` is the mount the person came through — `{ kind: 'person' }` when the app was added for them, `{ kind: 'chat', chat, name }` when it was added for a chat they are in (the chat's id and the name people see for it). Everything in it is what the host verified. A module that keeps a chat's data apart writes its rule from `via` (everyone may hand in, only the finance chat may read: check `via.kind === 'chat' && via.chat === …`). For an agent's tool call: `{ persona, name, sandbox, chat, word? }` (below).
+
+On a host's computer two more things hold. A write reaches the module only from the app's own page (the computer's address refuses a request that is not `GET`/`HEAD` unless the browser says it came from the app's own origin), and a body of the kinds any page may send without asking (`text/plain`, a form, multipart) is refused `415` before any route runs. And only the frontend leaves the computer: `frontend.jsx`, the module's files it imports by a relative path, and the files under its `assets/` folder; a backend's own files (`db.js`, an import script) are never served.
+
+### A process per backend
+
+A module that crashes or loops takes down its own process and nothing else. Every `backend.js` runs in its own node process, started by the shell, which forwards the module's `/api/<ws>/<id>/…` to it and carries its `ctx.broadcast` onto its real-time topic. The contract is the same: `mountRoutes(router, ctx)`, the scoped router, the teardown it returns. What a module can notice:
+
+- **Modules share no memory.** `ctx.module(id)` is a plain object inside the module's own process: it does not reach another module, and it does not survive a save (a save starts a fresh process). Talk to another module through its API.
+- **A crash ends the process, not just a request.** An uncaught throw, `process.exit()`, running out of memory, or a loop (no answer to the shell's ping for 10 s) ends that process. The shell logs one line, the module's lane answers `500` with the error (and the overlay shows it) while it is down, and a fresh process starts after 1 s, then 2 s, 4 s … at most 30 s; the wait goes back to 1 s once a process has stayed up a minute. Every other module keeps running.
+- **`process.cwd()` and the environment** are the shell's (`PORT`, `HOST`, `BASE_URL`).
+- **The configured `auth` module stays in the shell's process.** It is the shell's gate (`authenticate` / `authorize` / `handleUnauth` run on every request), not a feature module.
 
 ### Frontend self-reference (workspace-aware, never hardcoded)
 
@@ -115,20 +201,21 @@ Backends write persistent state under `ctx.dataDir` (`<module>/data/`). It's per
 
 ## Error handling — module failures are isolated
 
-A module's backend is **untrusted code sharing the shell's process**, so the shell contains its failures: one module can't take down another, the chrome, or the runtime. Where a failure surfaces depends on *when* it happens — and it's always **per-module** (keyed by `qualifiedId`):
+A module's backend runs in **its own process** (see [A process per backend](#a-process-per-backend)), so one module can't take down another, the chrome, or the runtime. Where a failure surfaces depends on *when* it happens — and it's always **per-module** (keyed by `qualifiedId`):
 
 | Failure | What happens |
 |---|---|
 | **Backend won't load** (import throws — e.g. a node_modules dep loaded with a static `import` instead of `createRequire`) | That module's `/api/<ws>/<id>/*` returns **`500`** with the error + the fix, and a dev **error overlay** shows it. Every other module keeps running. |
 | **A request handler throws** | Caught per-request → **`500`** (or `err.statusCode` — `throw` an error carrying a `statusCode`, e.g. a `413`) with `{ error: message }`. Only that one request is affected. |
-| **Uncaught async error** — a `setInterval`, an event handler, an unhandled rejection in a background task, *outside* any request | Attributed to the module from the stack, surfaced via its **`500` + overlay**, and the **shell stays alive**. (This is where most "it crashed the whole server" bugs live.) |
-| **Frontend component throws** (render) | The chrome's error boundary shows it as `active.kind === 'error'`; the rest of the page and other modules are unaffected. |
+| **Uncaught async error** — a `setInterval`, an event handler, an unhandled rejection in a background task, *outside* any request | That module's process ends; its lane answers **`500` + overlay** with the error; a fresh process starts with backoff. The shell and every other module stay alive. |
+| **A loop, `process.exit()`, out of memory** | The same: that process ends (a loop is killed after 10 s without an answer) and restarts with backoff. |
+| **Frontend component throws** (render) | Shown inside the module's own frame; the page, the chrome and other modules are unaffected. |
 | **The chrome itself throws** (render — it's the React root) | The shell's boundary catches it: a "Chrome Error" overlay instead of a blank page, the rest of the client stays alive, and editing the chrome **auto-reloads** to recover. |
 | **A shell-level fault** (no module in the stack — i.e. atelier's own bug) | The shell **crashes** with a banner naming what it can. That's our bug to fix, not something to hide. |
 
 The `500` + overlay clear automatically once the module loads and runs cleanly again.
 
-**Limits — in-process isolation is not a sandbox.** A module that runs a **synchronous infinite loop** (blocks the event loop), calls **`process.exit()`**, or exhausts memory still takes the shell down — those need true process isolation, which the shared-runtime design (shared `ctx.module` slots, one WebSocket, one React) intentionally trades away. Isolation covers the common case — anything that *throws* — not a runaway module.
+**Limits — a process is not a sandbox.** A backend process runs as the same user as the shell and can read what that user can read. The walls between modules on a computer (one sandbox, one data/ each) are a host's, not a laptop's.
 
 **Clean up in `teardown()`** (timers, listeners, child processes — see [Hot reload](#hot-reload-dev)): it's what stops a fixed module's old resources after a hot reload, and what keeps a faulting module from leaking.
 
@@ -170,15 +257,15 @@ unsub();   // when no longer interested
 
 ## Hot reload (dev)
 
-When `hotReload` is on (the default), editing a **`.js`** file under `<module>/` (its `backend.js` or any first-party `.js` it imports) re-imports *just that module's* backend — the atelier process keeps running, other modules untouched (one agent's typo can't crash the others). The shell:
+When `hotReload` is on (the default), editing a **`.js`** file under `<module>/` (its `backend.js` or any first-party `.js` it imports) restarts *just that module's* backend process — the shell and other modules untouched (one agent's typo can't crash the others). The shell:
 
 - Runs a native recursive `fs.watch` on the module directory. Watching the dir (not the file) survives atomic saves that change inode, and catches edits to transitive imports (`parser.js`, `lib/*.js`) — not just `backend.js`. Ignores `node_modules/`, `data/`, dotfiles, `_`-prefixed segments; a 150 ms debounce + newest-`.js`-mtime dedupe coalesce duplicate OS events.
-- **Bundles** the module with esbuild (`packages: 'external'`, first-party transitive imports baked in, `import.meta.url` preserved) and imports via a base64 `data:` URL. Unique bytes → unique URL → Node's import cache serves the new version.
-- If the import throws, the shell keeps the old version running and logs `reload failed, keeping current version` — and, exactly like an initial load failure, surfaces it **loudly**: the module's `/api/<ws>/<id>/*` returns a `500` carrying the error + fix and a dev error overlay shows it, clearing automatically once a clean reload succeeds (see [Error handling](#error-handling--module-failures-are-isolated)). If it imports cleanly, strips the old routes, calls teardown, mounts the new version (`↻ reloaded <qualifiedId> backend`).
+- **Bundles** the module with esbuild (`packages: 'external'`, first-party transitive imports baked in, `import.meta.url` preserved) and loads it in a **new process** via a base64 `data:` URL.
+- If the load throws, the shell keeps the old process running and logs `reload failed, keeping current version` — and, exactly like an initial load failure, surfaces it **loudly**: the module's `/api/<ws>/<id>/*` returns a `500` carrying the error + fix and a dev error overlay shows it, clearing automatically once a clean reload succeeds (see [Error handling](#error-handling--module-failures-are-isolated)). If it loads cleanly, the old process tears down and exits, then the new one mounts (`↻ reloaded <qualifiedId> backend · pid N`).
 
-Editing the **shell** itself (`server.js`, `build.js`, `discovery.js`, `client.jsx`, `chrome-resolve.js`) still needs a manual restart. Set `hotReload: false` (or `ATELIER_HOT_RELOAD=0`) to disable all watchers + backend hot-swap in a deployed instance.
+Editing the **shell** itself (`server.js`, `build.js`, `discovery.js`, `client.jsx`, `chrome-resolve.js`, `frame.jsx`, `backend-host.js`, `module-json.js`) still needs a manual restart. Set `hotReload: false` (or `ATELIER_HOT_RELOAD=0`) to disable all watchers + backend hot-swap in a deployed instance.
 
-**Closure state resets automatically** — a re-bundled import is a fresh module graph, so module-level variables (an in-memory cache, a child-process `Map`, a subscribers Set) re-initialize. **Side effects need a teardown** — anything registered *outside* the closure (`fs.watch`, `setInterval`, `spawn`ed children, long-lived sockets) survives a re-import, so return a cleanup function from `mountRoutes`:
+**State resets automatically** — a save is a fresh process, so module-level variables and `ctx.module` slots start empty. **Side effects still want a teardown** — a listening sidecar port, `spawn`ed children: return a cleanup function from `mountRoutes`; it runs before the process exits (on a save, on shutdown):
 
 ```js
 export default {
@@ -197,7 +284,9 @@ Rule of thumb: spawns a process, opens a file/socket, or holds a long-lived conn
 
 ## Cross-module state — `ctx.module(id)`
 
-For when one module has a small piece of context another wants — without HTTP, import coupling, or module-private files. `ctx.module(id)` returns a **plain object** keyed by `(caller's workspace, target id)`; every caller in the same workspace asking for the same id gets the same object.
+> **Since each backend is its own process, a slot is per process:** it does not reach another module and does not survive a save. What follows describes the slot within one module's process; for anything between modules, call the other module's API.
+
+`ctx.module(id)` returns a **plain object** keyed by id, inside the calling module's process.
 
 ```js
 // Most common — stash your OWN long-lived state so it survives hot-reload
@@ -230,11 +319,27 @@ A few rules so modules compose cleanly with the shell and each other:
 4. **Use `ctx.qualifiedId` (or `self`) for absolute URLs the client follows** — never a literal `/api/<your-name>/...`, which only works under `global`.
 5. **Don't edit the shell** (`atelier/server.js` / `client.jsx` / `build.js` / `discovery.js` / `chrome-resolve.js`) from a module task. The shell is cross-cutting; changes there are their own task with their own authorization. If your module needs something the shell doesn't provide, name the gap and ask.
 
+## The frame — a module on its own origin
+
+The instance serves the chrome, which shows every module in a frame on its own origin. An app on its own origin cannot read the page, the sidebar or another app: the page owns the chrome, apps own their pixels.
+
+On a laptop a module's origin is `http://<id>.localhost:<port>` (a workspace module: `<id>.<workspace>.localhost`); browsers send every `*.localhost` name to this machine. The chrome renders the module in its content area; what it receives as `active.element` is an `<iframe>` on that origin. On the module's origin the shell serves that module and nothing of the shell: the frame page, the frame's runtime (React and `/_frame/frame.js`), the chrome's stylesheet built over the chrome's and this module's classes (no other module's) and the chrome's `@atelier/kit`, the module's own files (`/modules/<ws>/<id>/…`), its API (`/api/<ws>/<id>/…`), and a real-time channel carrying only its topic. Anything else there answers 404. Only this instance's page may embed the frame (`Content-Security-Policy: frame-ancestors`). Under a host, a sidebar entry may name a frame origin for a module that runs elsewhere (a remote module): there the shell serves only the frame's part (the page, React, `/_frame/*`, the channel) and the host answers the module's own paths; the frame's stylesheet then holds the chrome's classes only.
+
+**The bridge** — `postMessage`, with the exact origin both ways, carrying this and nothing else:
+
+| the frame gets | the frame gives |
+|---|---|
+| `init { route, href, title, theme }` when it is ready · `route { route, href }` (back/forward, a deep link) · `theme { theme }` · `dim { on }` (a dialog of the page is open) · ⌘K and Esc pressed inside the frame are handed to the page as if pressed there | `route { route, replace }` · `title { title }` (the module's `document.title`) |
+
+Inside the frame a module has `window.__atelier.self`, `.subscribe` and `.useRoute` (`navigate` updates the page's address through the bridge; in the frame the URL is only replaced, the page owns the history), and, optional, `window.__atelier.deepLink()` — the page's address for the module at its current route. The frame toggles `dark` on its own `<html>` from the page's theme.
+
+What a module cannot do: reach the page (`window.parent.document`, the chrome's DOM, another module's state), or contribute UI to the chrome — a `TopBarCenter` slot or a module marked `meta.eager` does not run in the page. A frame fills the content area to the bottom of the window and scrolls inside.
+
 ## What a module gets (ambient)
 
 No shared UI library to import, no build config:
 
-- **React** on `window.React` (UMD) — `const { useState } = React`.
+- **React** on `window.React` (UMD) — `const { useState } = React`, inside its frame.
 - **Tailwind** classes from whichever chrome is mounted (tokens from the active chrome's `styles.css`); use `className=` freely.
 - **Rail icon** named by `meta.icon`, rendered by the active chrome (the shell ships none).
 - **`window.__atelier.self(import.meta.url)`** → `{ workspace, id, qid, topic, api, subscribe }`, and **`window.__atelier.subscribe(topic, handler)`** — the WS multiplex. Plus backend `ctx.module(id)` slots and `@atelier/kit`. There is no frontend method-call registry.
@@ -363,8 +468,8 @@ The shell calls `chrome(props)` with:
 | `workspaces` | `[{ id, name?, modules: [{ id, meta }] }]` |
 | `workspace` | the currently-routed workspace id |
 | `activeQid` | the active module's qualifiedId, or `null` |
-| `active` | `{ kind: 'none' \| 'loading' \| 'error' \| 'ready', element?, err?, qid? }` — what to put in the content area |
-| `loadedModules` | `{ [qid]: { hasDefault, TopBarCenter, meta, status, err } }` — **lazily populated**: the active module plus any module with `meta.eager` (see below); other modules appear here on their first visit |
+| `active` | `{ kind: 'none' \| 'error' \| 'ready', element?, err?, qid?, title? }` — what to put in the content area. For a module, `element` is its frame; `title` is what the frame gave as its title, or `null` |
+| `loadedModules` | `{}` — modules run in their frames, the page imports none of them (kept so a chrome that reads it keeps working) |
 | `navigate(qid)` | SPA-navigate to a module |
 | `pickWorkspace(wsId)` | switch workspace |
 
