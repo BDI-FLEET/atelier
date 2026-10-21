@@ -1,4 +1,5 @@
-// The files of the hosted CLI, the backend processes and module-serve, by name, for the measures that read them.
+// The files of the hosted CLI, the backend processes, frames, the host switch and its pages and module-serve, by name,
+// for the measures that read them.
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
