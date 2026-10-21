@@ -1,9 +1,11 @@
 // backend-procs.js with a stand-in for node's fork: each process is a fake child that answers the shell's messages when
-// the test lets it, so a start, a reload and a stop can be raced in a known order and the live processes counted.
+// the test lets it, so a start, a reload and a stop can be raced in a known order and the live processes counted, and the
+// watchdog runs a round when the test says, against BACKEND_LOOP_PINGS from limits.js.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
 import { createBackendProcs } from '../backend-procs.js'
+import { BACKEND_LOOP_PINGS } from '../limits.js'
 
 const QID = 'global/notes'
 const notes = { id: 'notes', workspace: 'global', qualifiedId: QID, dir: '/nowhere' }
@@ -30,18 +32,22 @@ class UnforkedChild extends EventEmitter {
   kill() { return false }
 }
 
-/* The shell's side with fake children; `hold()` makes the next bundle wait until the promise it returns is let go. */
+/* The shell's side with fake children; `hold()` makes the next bundle wait until the promise it returns is let go, and
+ * `watch()` runs one round of the watchdog. */
 function seam({ Child = FakeChild } = {}) {
   const children = [], told = [], holds = []
+  let round = null
   const procs = createBackendProcs({
     hostDir: '/nowhere', auth: null, label: null, port: 0, host: '127.0.0.1', baseUrl: 'http://localhost',
     bundle: async () => { const h = holds.shift(); if (h) await h; return '' },
     fork: () => { const c = new Child(1000 + children.length); children.push(c); return c },
+    every: (fn) => { round = fn },
     broadcast: () => {}, setError: (...a) => told.push(['error', ...a]), clearError: (qid) => told.push(['clear', qid]), enrichError: (e) => String(e),
   })
   const hold = () => { let go; holds.push(new Promise((r) => { go = r })); return go }
   const live = () => children.filter((c) => c.alive)
-  return { procs, children, told, hold, live }
+  const watch = async (rounds = 1) => { for (let i = 0; i < rounds; i++) { round(); await settle() } }
+  return { procs, children, told, hold, live, watch }
 }
 const settle = () => new Promise((r) => setImmediate(r))
 
@@ -100,5 +106,38 @@ test('a process that cannot be forked ends the wait, and the mount fails with th
   assert.deepEqual(told, [['error', QID, sentence, 'load']])
   assert.deepEqual(said.mock.calls.map((c) => c.arguments[0]), [`  ! ${QID}: backend failed to load — ${sentence}`])
   assert.deepEqual([...procs.ids()], [])
+  procs.stopAll()
+})
+
+test('a process that leaves BACKEND_LOOP_PINGS pings in a row unanswered is killed as a loop, and a pong starts the count again', async (t) => {
+  t.mock.method(console, 'log', () => {})
+  t.mock.method(console, 'error', () => {})
+  const { procs, children, told, watch } = seam()
+  assert.equal(await procs.start(notes), true)
+  const [child] = children
+  child.answersPings = false
+  await watch(BACKEND_LOOP_PINGS - 1)
+  child.answersPings = true
+  await watch()
+  child.answersPings = false
+  await watch(BACKEND_LOOP_PINGS)
+  assert.equal(child.alive, true, 'the pong before these pings started the count again')
+  await watch()
+  assert.equal(child.alive, false)
+  assert.deepEqual(told.at(-1), ['error', QID, `This module's backend left ${BACKEND_LOOP_PINGS} pings in a row unanswered (a loop?) and was killed.`, 'crash'])
+  procs.stopAll()
+})
+
+test('a sleep of the machine kills nothing: the clock moves a day between two rounds and the process that answers stays', async (t) => {
+  t.mock.method(console, 'log', () => {})
+  t.mock.timers.enable({ apis: ['Date'] })
+  const { procs, children, told, watch } = seam()
+  assert.equal(await procs.start(notes), true)
+  const [child] = children
+  await watch()
+  t.mock.timers.setTime(Date.now() + 24 * 3600 * 1000)
+  await watch()
+  assert.equal(child.alive, true)
+  assert.deepEqual(told, [['clear', QID]])
   procs.stopAll()
 })

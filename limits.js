@@ -71,11 +71,11 @@ export const CRASH_REPORT_MS = 500;
 /* How long a stopping backend (in its own process, or in module-serve) gives its last messages to leave before it exits. */
 export const STOP_FLUSH_MS = 20;
 
-/* How long the shell lets a backend's process answer before it counts as stuck in a loop and is killed. */
-export const BACKEND_LOOP_MS = 10_000;
-
 /* How often the shell pings each backend's process. */
 export const BACKEND_PING_MS = 2000;
+
+/* How many pings in a row a backend's process leaves unanswered before it counts as stuck in a loop and is killed: five, ten seconds at one ping every two. */
+export const BACKEND_LOOP_PINGS = 5;
 
 /* How long a backend's process has to tear down before it is killed. */
 export const BACKEND_STOP_MS = 2000;

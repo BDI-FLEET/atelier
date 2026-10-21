@@ -9,8 +9,9 @@
  *   • A crash (an uncaught throw, process.exit, out of memory) ends that process: the shell logs one line, the
  *     module's lane answers 500 with the error, and a fresh process starts after BACKEND_RESTART_FIRST_MS, the wait
  *     doubling up to BACKEND_RESTART_MAX_MS; it starts over once a process has stayed up BACKEND_STEADY_MS.
- *   • A loop: the shell pings every process every BACKEND_PING_MS; one that has not answered for LOOP_MS is killed,
- *     then restarted the same way.
+ *   • A loop: the shell pings every process every BACKEND_PING_MS; one that leaves BACKEND_LOOP_PINGS pings in a row
+ *     unanswered is killed, then restarted the same way. Pings are counted, not the clock: a machine that slept kills
+ *     nothing on waking.
  *   • A save restarts that module's process alone: the new code loads in a new process first; if it fails, the old
  *     one keeps serving. If it loads, the old process tears down, then the new one mounts.
  *
@@ -20,7 +21,7 @@
  *
  * server.js hands `createBackendProcs` what a process is started with (its folder, the instance's settings, the
  * configured auth module, the bundler) and where its news goes (the module's topic, the backend-error state). `fork`,
- * when given, stands for node's own.
+ * when given, stands for node's own, and `every` for the timer that runs the watchdog.
  */
 
 import fs from 'node:fs';
@@ -31,14 +32,14 @@ import crypto from 'node:crypto';
 import { fork } from 'node:child_process';
 import { GLOBAL_WORKSPACE } from './discovery.js';
 import { CALLER_HEADER, SHELL_HEADER } from './router.js';
-import { BACKEND_LOOP_MS, BACKEND_PING_MS, BACKEND_STOP_MS, BACKEND_RESTART_FIRST_MS, BACKEND_RESTART_MAX_MS, BACKEND_STEADY_MS, SOCKET_HASH_CHARS } from './limits.js';
+import { BACKEND_LOOP_PINGS, BACKEND_PING_MS, BACKEND_STOP_MS, BACKEND_RESTART_FIRST_MS, BACKEND_RESTART_MAX_MS, BACKEND_STEADY_MS, SOCKET_HASH_CHARS } from './limits.js';
 
-const LOOP_MS = Number(process.env.ATELIER_BACKEND_LOOP_MS || BACKEND_LOOP_MS);
 const exitWords = (b, r) => b.crashMessage || (r.error ? `the backend process could not start: ${r.error}` : `the backend process ended (${r.signal || `exit ${r.code}`})`);
 
 export function createBackendProcs(shell) {
   const { hostDir, auth, label, port, host, baseUrl } = shell;
   const forkProcess = shell.fork ?? fork;
+  const every = shell.every ?? ((round, ms) => setInterval(round, ms).unref());
   const backendProcs = new Map();       // qid → { m, b (current process or null), backoff, upSince, restartTimer, gone }
   const BACKEND_HOST = path.join(hostDir, 'backend-host.js');
   const SOCK_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'atelier-'));   // 0700: the sockets are the shell's alone
@@ -62,12 +63,12 @@ export function createBackendProcs(shell) {
   function forkBackend(m, code, order) {
     const socketPath = path.join(SOCK_DIR, `${crypto.createHash('sha1').update(m.qualifiedId).digest('hex').slice(0, SOCKET_HASH_CHARS)}-${++sockGen}.sock`);
     const child = forkProcess(BACKEND_HOST, [], { stdio: ['ignore', 'inherit', 'inherit', 'ipc'] });
-    const b = { m, child, socketPath, order, alive: true, crashMessage: null, lastPong: Date.now(), stopping: false, loop: false, onExit: null, _wait: null };
+    const b = { m, child, socketPath, order, alive: true, crashMessage: null, unanswered: 0, stopping: false, loop: false, onExit: null, _wait: null };
     b.wait = (types) => new Promise((res) => { b._wait = { types, res }; });
     child.on('message', (msg) => {
       if (!msg || typeof msg !== 'object') return;
       if (msg.type === 'broadcast') { shell.broadcast(m.qualifiedId, msg.event || {}); return; }
-      if (msg.type === 'pong') { b.lastPong = Date.now(); return; }
+      if (msg.type === 'pong') { b.unanswered = 0; return; }
       if (msg.type === 'crash') { b.crashMessage = msg.message; return; }
       if (b._wait && b._wait.types.includes(msg.type)) { const w = b._wait; b._wait = null; w.res(msg); }
     });
@@ -107,7 +108,7 @@ export function createBackendProcs(shell) {
   async function mountBackendProcess(b) {
     b.child.send({ type: 'mount' });
     const r = await b.wait(['ready', 'load-error']);
-    if (r.type === 'ready') { b.lastPong = Date.now(); return null; }
+    if (r.type === 'ready') return null;
     return r.type === 'load-error' ? r.message : exitWords(b, r);
   }
   function killBackend(b, signal = 'SIGTERM') {
@@ -149,7 +150,7 @@ export function createBackendProcs(shell) {
     if (b.stopping || e.b !== b || e.gone) return;   // stopped on purpose, or replaced
     e.b = null;
     const qid = e.m.qualifiedId;
-    const why = b.loop ? `stopped answering for ${Math.round(LOOP_MS / 1000)} s (a loop?) and was killed` : exitWords(b, r);
+    const why = b.loop ? `left ${BACKEND_LOOP_PINGS} pings in a row unanswered (a loop?) and was killed` : exitWords(b, r);
     e.backoff = (Date.now() - e.upSince > BACKEND_STEADY_MS || !e.backoff) ? BACKEND_RESTART_FIRST_MS : Math.min(e.backoff * 2, BACKEND_RESTART_MAX_MS);
     shell.setError(qid, b.loop ? `This module's backend ${why}.` : shell.enrichError(why, e.m.dir), 'crash');
     console.error(`  ! ${qid}: backend process ended (${b.loop ? 'no answer, killed' : r.signal || `exit ${r.code}`}) · restarting in ${e.backoff / 1000} s · the rest keeps running`);
@@ -222,15 +223,15 @@ export function createBackendProcs(shell) {
   }
 
   // The watchdog for loops: a process blocked in a loop cannot answer a ping.
-  setInterval(() => {
-    const now = Date.now();
+  every(() => {
     for (const e of backendProcs.values()) {
       const b = e.b;
       if (!b || !b.alive || b.stopping) continue;
-      if (now - b.lastPong > LOOP_MS) { b.loop = true; try { b.child.kill('SIGKILL'); } catch {} continue; }
+      if (b.unanswered >= BACKEND_LOOP_PINGS) { b.loop = true; try { b.child.kill('SIGKILL'); } catch {} continue; }
+      b.unanswered++;
       try { b.child.send({ type: 'ping' }); } catch {}
     }
-  }, BACKEND_PING_MS).unref();
+  }, BACKEND_PING_MS);
 
   // The module's lane, forwarded to its process. `decided` is what the shell decided about the request (the user the
   // gate resolved, the caller); it rides on a header only the shell sets, on a socket only the shell can open.
