@@ -1,12 +1,14 @@
-// atelier attach and atelier agent attach — exercised through the real CLI
-// against an in-process fake of the host API's four attach routes: the
+// atelier attach (attach.js) and atelier agent attach (agent-attach.js), one client (attach-client.js), exercised
+// through the real CLI against an in-process fake of the host API's four attach routes: the
 // exit codes, the footer and the detach sentence, agent attach
 // writing by default, --watch without input, the target's defaults (the remote computer's main, a bare name, /name on
 // the remote, several computers refused), a revoked session, the shell with another person's line marked; in a
 // real terminal (a tmux pane): the size said and followed, the scrollback's
 // gestures, and the terminal given back as it was; the wheel, notch by notch,
 // on both verbs (a scrolled view kept while the pane writes on, the bottom
-// following it again), and a screen with no scrollback said in the footer.
+// following it again), and a screen with no scrollback said in the footer; the keys that stop a program kept from the
+// agent's session, the shell's own exit a way out, a screen closed before its first frame a refusal, each verb's file
+// run on its own, and markedLines on its own.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawn, execFileSync } from 'node:child_process'
@@ -15,6 +17,7 @@ import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { markedLines, SHELL_EXITED } from '../attach-client.js'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const CLI = path.resolve(HERE, '..', 'cli.js')
@@ -28,8 +31,8 @@ const TWO = [...ONE, { id: 't9', label: 'team', kind: 'room', line: 'shared with
 
 // The fake host: one attach at a time; a frame at once, a new one per keys call; detach ends the stream.
 // `history`: the rows of scrollback above the screen; 0 is a screen that keeps none (its program on the alternate screen),
-// where a scroll up is answered as the host answers it.
-async function fakeHost({ grant = true, handover = true, computers = ONE, history = 100 } = {}) {
+// where a scroll up is answered as the host answers it. `frameAtOnce: false` opens the screen without a frame.
+async function fakeHost({ grant = true, handover = true, computers = ONE, history = 100, frameAtOnce = true } = {}) {
   const calls = []
   const keys = []
   const views = []
@@ -58,7 +61,7 @@ async function fakeHost({ grant = true, handover = true, computers = ONE, histor
     if (req.method === 'GET' && req.url === '/api/attach/at-0123abcd/screen') {
       res.writeHead(200, { 'content-type': 'application/x-ndjson' })
       screen = res
-      res.write(JSON.stringify(frame()) + '\n')
+      if (frameAtOnce) res.write(JSON.stringify(frame()) + '\n')
       return
     }
     if (req.method === 'POST' && req.url === '/api/attach/at-0123abcd/keys') {
@@ -112,11 +115,16 @@ async function fakeHost({ grant = true, handover = true, computers = ONE, histor
 
 /* A CLI run whose stdin we keep open and write into; `until` waits for its output. */
 function attach(home, args, verb = ['agent', 'attach'], env = {}, cwd = home) {
+  return running([CLI, ...verb, ...args], home, env, cwd)
+}
+
+/* A node script run with this home, as attach runs the CLI. */
+function running(argv, home, env = {}, cwd = home) {
   const childEnv = { ...process.env, HOME: home, ...env }
   delete childEnv.XDG_CONFIG_HOME
   if (!('ATELIER_HOST' in env)) delete childEnv.ATELIER_HOST
   // run in a folder of its own (by default the throwaway home): never inside a module folder by accident
-  const p = spawn(process.execPath, [CLI, ...verb, ...args], { cwd, env: childEnv, stdio: ['pipe', 'pipe', 'pipe'] })
+  const p = spawn(process.execPath, argv, { cwd, env: childEnv, stdio: ['pipe', 'pipe', 'pipe'] })
   let stdout = '', stderr = ''
   p.stdout.on('data', (d) => { stdout += d })
   p.stderr.on('data', (d) => { stderr += d })
@@ -407,4 +415,78 @@ test('a screen that keeps no scrollback (its program on the alternate screen): t
     try { T('kill-server') } catch {}
     await host.close()
   }
+})
+
+test('run on its own, agent-attach.js asks for the agent\'s session and attach.js for the workspace\'s shell', async () => {
+  const host = await fakeHost({ handover: false })
+  try {
+    for (const [file, onto] of [['agent-attach.js', 'agent'], ['attach.js', 'shell']]) {
+      const a = running([path.resolve(HERE, '..', file), '--watch', '--host', host.url], signedInHome(host.url))
+      await a.until('the first frame', () => a.out.includes('fake agent · pid 42'))
+      assert.equal(host.calls.filter((c) => c.url === '/api/attach').at(-1).body.onto, onto, file)
+      a.type('\x1d')
+      assert.equal((await a.closed()).code, 0, file)
+    }
+  } finally { await host.close() }
+})
+
+test('the keys that stop a program never reach the agent\'s session while the shell gets every key as typed', async () => {
+  const typed = 'a\x03b\x04c\x1ad\x1ce\r'
+  for (const [verb, sent] of [[['agent', 'attach'], 'abcde\r'], [['attach'], typed]]) {
+    const host = await fakeHost()
+    try {
+      const a = attach(signedInHome(host.url), ['k1/main', '--host', host.url], verb)
+      await a.until('the first frame', () => a.out.includes('fake agent · pid 42'))
+      a.type(typed)
+      await a.until('the keys sent', () => host.keys.join('').endsWith('\r'))
+      assert.equal(host.keys.join(''), sent, verb.join(' '))
+      a.type('\x1d')
+      assert.equal((await a.closed()).code, 0)
+    } finally { await host.close() }
+  }
+})
+
+test('the shell\'s own exit is a way out of attach that exits 0 and leaves the workspace running, while on the agent\'s session it is a closed attach that exits 1', async () => {
+  for (const [verb, code, said] of [[['attach'], 0, `detached · ${SHELL_EXITED} · the workspace keeps running`], [['agent', 'attach'], 1, `k1/main closed the attach: ${SHELL_EXITED}`]]) {
+    const host = await fakeHost()
+    try {
+      const a = attach(signedInHome(host.url), ['k1/main', '--host', host.url], verb)
+      await a.until('the first frame', () => a.out.includes('fake agent · pid 42'))
+      host.closeScreen(SHELL_EXITED)
+      const r = await a.closed()
+      assert.equal(r.code, code, r.out)
+      assert.ok(r.out.includes(said), r.out)
+    } finally { await host.close() }
+  }
+})
+
+test('a screen the host closes before its first frame is a refusal said as the host\'s one sentence with exit 1', async () => {
+  const host = await fakeHost({ frameAtOnce: false })
+  try {
+    const a = attach(signedInHome(host.url), ['k1/main', '--host', host.url])
+    await a.until('the screen asked for', () => host.calls.some((c) => c.url.endsWith('/screen')))
+    host.closeScreen('the workspace is asleep')
+    const r = await a.closed()
+    assert.equal(r.code, 1, r.out)
+    assert.match(r.out, /atelier agent attach: the workspace is asleep/)
+    assert.ok(!r.out.includes('detached'), r.out)
+  } finally { await host.close() }
+})
+
+test('markedLines puts the name of whoever started a line in front of it and moves the cursor with it, draws a line of yours from any of your terminals as it is, and drops a mark off the screen', () => {
+  const frame = {
+    lines: ['~ $ ls', '~ $ npm test', '~ $ git st'],
+    cursor: { x: 10, y: 2 },
+    marks: [
+      { attach: 'at-mine', person: 'person:alex', name: 'Alex', row: 0 },
+      { attach: 'at-alex-laptop', person: 'person:alex', name: 'Alex', row: 1 },
+      { attach: 'at-sam', person: 'person:sam', name: 'Sam', row: 2 },
+      { attach: 'at-sam', person: 'person:sam', name: 'Sam', row: 3 },
+      { attach: 'at-sam', person: 'person:sam', name: 'Sam', row: -1 },
+      null,
+    ],
+  }
+  assert.deepEqual(markedLines(frame, 'at-mine', 'person:alex'), { lines: ['~ $ ls', '~ $ npm test', '[Sam] ~ $ git st'], cursor: { x: 16, y: 2 } })
+  assert.deepEqual(frame.lines, ['~ $ ls', '~ $ npm test', '~ $ git st'], 'the frame itself is left as it came')
+  assert.deepEqual(markedLines({ ...frame, marks: undefined }, 'at-mine', 'person:alex').lines, frame.lines, 'a frame without marks is drawn as it is')
 })
