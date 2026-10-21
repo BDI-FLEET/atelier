@@ -23,12 +23,14 @@
  *
  * Kept dependency-free (node builtins + global fetch).
  */
+import fs from 'node:fs';
 import os from 'node:os';
+import crypto from 'node:crypto';
 import { readCredentials, askHost, sessionFor, sentenceOf, notSignedIn, unreachable, hostAnswer, hostAnswered, exitOfRefusal } from './session.js';
 import { inSandbox, askSocket } from './sandbox.js';
 import { DEFAULT_REMOTE, NOT_A_MODULE_FOLDER, moduleHere, parseRemote, remoteOf } from './repo.js';
 import { readArgs, REMOTE } from './args.js';
-import { OP_QUIET_MS, OP_FOLLOW_MS, MACHINE_NAME_CHARS } from './limits.js';
+import { OP_QUIET_MS, OP_FOLLOW_MS, MACHINE_NAME_CHARS, PIECE } from './limits.js';
 
 export { inSandbox };
 
@@ -125,6 +127,27 @@ export async function runOp(name, target, op, { during, socket, onFrame = printF
 
 /* How the host's record names this machine ("from <name>"): ATELIER_MACHINE, else this machine's hostname. */
 export const machineName = () => (process.env.ATELIER_MACHINE || os.hostname() || 'a machine').slice(0, MACHINE_NAME_CHARS);
+
+/* A file's sha256, read as a stream. */
+export const shaOf = (f) => new Promise((ok, no) => { const h = crypto.createHash('sha256'); fs.createReadStream(f).on('data', (d) => h.update(d)).on('error', no).on('end', () => ok(h.digest('hex'))); });
+
+/* A file's bytes from `from` up to `size` into an op as `put` pieces of at most PIECE, each read from the file's
+ * descriptor when it goes; the computer answers where the next one starts. → how many bytes it took. */
+export async function putPieces(into, put, file, { from = 0, size }) {
+  const fd = fs.openSync(file, 'r');
+  let took = 0;
+  try {
+    for (let at = Math.min(from, size); at < size;) {
+      const buf = Buffer.alloc(Math.min(PIECE, size - at));
+      fs.readSync(fd, buf, 0, buf.length, at);
+      const p = await into({ put, at, data: buf.toString('base64') });
+      if (!Number.isInteger(p.at)) throw new Error(p.refused || 'the computer took no bytes');
+      took += Math.max(0, p.at - at);
+      at = p.at;
+    }
+  } finally { fs.closeSync(fd); }
+  return took;
+}
 
 /* A size in words: 812 B, 48.2 kB, 1.8 GB. */
 export const sizeWords = (b) => b < 1000 ? `${b} B` : b < 1e6 ? `${(b / 1e3).toFixed(1)} kB` : b < 1e9 ? `${(b / 1e6).toFixed(1)} MB` : `${(b / 1e9).toFixed(1)} GB`;

@@ -28,9 +28,8 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import crypto from 'node:crypto';
-import { failer, runOp, exitOf, inSandbox, sizeWords } from './ops.js';
-import { PIECE, FILES_PER_ASK, FILE_TRIES, MISSING_NAMED } from './limits.js';
+import { failer, runOp, exitOf, inSandbox, sizeWords, shaOf, putPieces } from './ops.js';
+import { FILES_PER_ASK, FILE_TRIES, MISSING_NAMED } from './limits.js';
 import { resolveHost } from './session.js';
 import { readArgs, helpOf, HOST } from './args.js';
 
@@ -69,7 +68,6 @@ const folder = path.resolve(words[1 - dir]);
 const t0 = Date.now();
 
 const took = () => { const s = Math.round((Date.now() - t0) / 1000); return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${s % 60} s`; };
-const shaOf = (f) => new Promise((ok, no) => { const h = crypto.createHash('sha256'); fs.createReadStream(f).on('data', (d) => h.update(d)).on('error', no).on('end', () => ok(h.digest('hex'))); });
 const when = (ms) => { const d = new Date(ms); return `${d.getDate()} ${d.toLocaleString('en', { month: 'short' })} ${String(d.getHours()).padStart(2, '0')}.${String(d.getMinutes()).padStart(2, '0')}`; };
 const beside = (p, who, ms) => { const ext = path.extname(p); return `${p.slice(0, p.length - ext.length)} (${who}, ${when(ms)})${ext}`; };
 
@@ -105,19 +103,7 @@ async function push(list, label = 'files') {
       const todo = [...need].map(([sha, from]) => ({ sha, from, f: list.find((x) => x.sha256 === sha) }));
       const toSend = todo.reduce((n, x) => n + x.f.size - Math.min(x.from, x.f.size), 0);
       console.error(`comparing … ${list.length} ${list.length === 1 ? label.replace(/s$/, '') : label}, ${sizeWords(toSend)} to send`);
-      for (const x of todo) {
-        const fd = fs.openSync(x.f.abs, 'r');
-        try {
-          for (let at = Math.min(x.from, x.f.size); at < x.f.size;) {
-            const buf = Buffer.alloc(Math.min(PIECE, x.f.size - at));
-            fs.readSync(fd, buf, 0, buf.length, at);
-            const p = await into({ put: x.sha, at, data: buf.toString('base64') });
-            if (!Number.isInteger(p.at)) throw new Error(p.refused || 'the computer took no bytes');
-            sent += Math.max(0, p.at - at);
-            at = p.at;
-          }
-        } finally { fs.closeSync(fd); }
-      }
+      for (const x of todo) sent += await putPieces(into, x.sha, x.f.abs, { from: x.from, size: x.f.size });
       const placing = list.filter((f) => need.has(f.sha256));
       for (let i = 0; i < placing.length; i += FILES_PER_ASK) {
         const p = await into({ place: placing.slice(i, i + FILES_PER_ASK).map(({ path, size, sha256 }) => ({ path, size, sha256 })) });

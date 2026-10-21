@@ -25,11 +25,9 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import crypto from 'node:crypto';
 import readline from 'node:readline/promises';
 import { spawnSync } from 'node:child_process';
-import { failer, whereOf, runOp, exitOf, sizeWords } from './ops.js';
-import { PIECE } from './limits.js';
+import { failer, whereOf, runOp, exitOf, sizeWords, shaOf, putPieces } from './ops.js';
 import { readArgs, helpOf, REMOTE } from './args.js';
 
 const SUBS = ['pull', 'push'];
@@ -78,7 +76,7 @@ if (sub === 'pull') {
             if (!b.length && at < total) throw new Error('the computer sent an empty piece');
           }
         } finally { fs.closeSync(fd); }
-        if (sha && crypto.createHash('sha256').update(fs.readFileSync(tar)).digest('hex') !== sha) throw new Error('the snapshot came down broken');
+        if (sha && await shaOf(tar) !== sha) throw new Error('the snapshot came down broken');
         await into({ end: true });
       },
       socket: { into: path.relative(process.cwd(), tar) },
@@ -108,15 +106,11 @@ const tar = path.join(work, SNAPSHOT);
 {
   const t = spawnSync('tar', ['-cf', tar, '-C', where.dir, 'data'], { encoding: 'utf8' });
   if (t.status !== 0) fail(`data/ could not be packed: ${(t.stderr || '').trim()}`, 1);
-  const bytes = fs.readFileSync(tar);
+  const size = fs.statSync(tar).size;
   const code = await runOp('data', where, { verb: 'data-push', confirm }, {
     during: async (into) => {
-      for (let at = 0; at < bytes.length;) {
-        const p = await into({ put: 'data', at, data: bytes.subarray(at, at + PIECE).toString('base64') });
-        if (!Number.isInteger(p.at)) throw new Error(p.refused || 'the computer took no bytes');
-        at = p.at;
-      }
-      const e = await into({ end: true, size: bytes.length, sha256: crypto.createHash('sha256').update(bytes).digest('hex') });
+      await putPieces(into, 'data', tar, { size });
+      const e = await into({ end: true, size, sha256: await shaOf(tar) });
       if (!e.ok) throw new Error(e.refused || 'the computer did not take the data');
     },
     socket: { from: path.relative(process.cwd(), tar) },

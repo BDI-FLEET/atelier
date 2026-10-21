@@ -102,7 +102,7 @@ A typical "production" folder sets something like `{ "hotReload": false, "auth":
 - `session.js` — the CLI's session with a host: the credentials file, the call to the host, and the sentence every verb says for each kind of answer.
 - `args.js` — a verb's arguments: its options declared as data, read by one loop, its help rendered from the same data.
 - `repo.js` — the module folder's repository: the git remote that says where an app lives, `<host>/git/<computer>/<module>.git`, and the app's label.
-- `ops.js` — the client of the maintain verbs: an op asked of the host (inside a sandbox, of the computer's socket), its lines and output streamed back, one exit convention.
+- `ops.js` — the client of the maintain verbs: an op asked of the host (inside a sandbox, of the computer's socket), its lines and output streamed back, one exit convention, and the readers data and files share (a file's pieces, its sha256).
 - `sandbox.js` — inside a sandbox: the computer's socket, the one way out, which `push`, `clone` and the maintain verbs use in place of a session.
 - `login.js` — `atelier login`: signs in to a host by approving a code in the browser, and keeps the session for that host.
 - `login-screen.js` — the screen `atelier login` draws while it waits: the title, the scene, the link with the code, the code.
