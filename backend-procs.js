@@ -34,7 +34,7 @@ import { CALLER_HEADER, SHELL_HEADER } from './router.js';
 import { BACKEND_LOOP_MS, BACKEND_PING_MS, BACKEND_STOP_MS, BACKEND_RESTART_FIRST_MS, BACKEND_RESTART_MAX_MS, BACKEND_STEADY_MS, SOCKET_HASH_CHARS } from './limits.js';
 
 const LOOP_MS = Number(process.env.ATELIER_BACKEND_LOOP_MS || BACKEND_LOOP_MS);
-const exitWords = (b, r) => b.crashMessage || `the backend process ended (${r.signal || `exit ${r.code}`})`;
+const exitWords = (b, r) => b.crashMessage || (r.error ? `the backend process could not start: ${r.error}` : `the backend process ended (${r.signal || `exit ${r.code}`})`);
 
 export function createBackendProcs(shell) {
   const { hostDir, auth, label, port, host, baseUrl } = shell;
@@ -58,6 +58,7 @@ export function createBackendProcs(shell) {
 
   // Fork one process for module m and hand it the bundled code. Returns the handle; `wait(types)` resolves with the
   // next message of those types, or { type: 'exit' } if the process ends first. `order` says when its load began.
+  // A process that could not be forked (no pid: EAGAIN, ENOMEM) ends with its error's words, as no exit follows.
   function forkBackend(m, code, order) {
     const socketPath = path.join(SOCK_DIR, `${crypto.createHash('sha1').update(m.qualifiedId).digest('hex').slice(0, SOCKET_HASH_CHARS)}-${++sockGen}.sock`);
     const child = forkProcess(BACKEND_HOST, [], { stdio: ['ignore', 'inherit', 'inherit', 'ipc'] });
@@ -70,13 +71,15 @@ export function createBackendProcs(shell) {
       if (msg.type === 'crash') { b.crashMessage = msg.message; return; }
       if (b._wait && b._wait.types.includes(msg.type)) { const w = b._wait; b._wait = null; w.res(msg); }
     });
-    child.on('error', () => {});
-    child.on('exit', (code, signal) => {
+    const end = (r) => {
+      if (!b.alive) return;
       b.alive = false;
       try { fs.unlinkSync(socketPath); } catch {}
-      if (b._wait) { const w = b._wait; b._wait = null; w.res({ type: 'exit', code, signal }); }
-      b.onExit?.(code, signal);
-    });
+      if (b._wait) { const w = b._wait; b._wait = null; w.res({ type: 'exit', ...r }); }
+      b.onExit?.(r);
+    };
+    child.on('error', (err) => { if (child.pid === undefined) end({ error: err?.message || String(err) }); });
+    child.on('exit', (code, signal) => end({ code, signal }));
     child.send({
       type: 'load',
       code,
@@ -94,7 +97,8 @@ export function createBackendProcs(shell) {
     const order = ++loads;
     let code;
     try { code = await shell.bundle(m); } catch (err) { return { error: err?.message || String(err) }; }
-    const b = forkBackend(m, code, order);
+    let b;
+    try { b = forkBackend(m, code, order); } catch (err) { return { error: exitWords({}, { error: err?.message || String(err) }) }; }
     const r = await b.wait(['loaded', 'load-error']);
     if (r.type === 'loaded') return { b };
     return { error: r.type === 'load-error' ? r.message : exitWords(b, r) };
@@ -137,7 +141,7 @@ export function createBackendProcs(shell) {
     e.m = m;
     e.b = b;
     e.upSince = Date.now();
-    b.onExit = (code, signal) => onBackendExit(e, b, { code, signal });
+    b.onExit = (r) => onBackendExit(e, b, r);
     return e;
   }
 

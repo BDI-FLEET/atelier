@@ -23,13 +23,20 @@ class FakeChild extends EventEmitter {
   end(code, signal) { if (!this.alive) return; this.alive = false; this.emit('exit', code, signal) }
 }
 
+/* A child that could not be forked, as node reports one: an error, no pid, and no exit after it. */
+class UnforkedChild extends EventEmitter {
+  constructor() { super(); this.pid = undefined; setImmediate(() => this.emit('error', Object.assign(new Error('spawn EAGAIN'), { code: 'EAGAIN' }))) }
+  send() { return false }
+  kill() { return false }
+}
+
 /* The shell's side with fake children; `hold()` makes the next bundle wait until the promise it returns is let go. */
-function seam() {
+function seam({ Child = FakeChild } = {}) {
   const children = [], told = [], holds = []
   const procs = createBackendProcs({
     hostDir: '/nowhere', auth: null, label: null, port: 0, host: '127.0.0.1', baseUrl: 'http://localhost',
     bundle: async () => { const h = holds.shift(); if (h) await h; return '' },
-    fork: () => { const c = new FakeChild(1000 + children.length); children.push(c); return c },
+    fork: () => { const c = new Child(1000 + children.length); children.push(c); return c },
     broadcast: () => {}, setError: (...a) => told.push(['error', ...a]), clearError: (qid) => told.push(['clear', qid]), enrichError: (e) => String(e),
   })
   const hold = () => { let go; holds.push(new Promise((r) => { go = r })); return go }
@@ -81,6 +88,17 @@ test('a stop while a reload is loading leaves no process, as the reload discards
   await settle()
   assert.equal(children.length, 2)
   assert.deepEqual(live(), [])
+  assert.deepEqual([...procs.ids()], [])
+  procs.stopAll()
+})
+
+test('a process that cannot be forked ends the wait, and the mount fails with the error\'s words', { timeout: 5000 }, async (t) => {
+  const said = t.mock.method(console, 'error', () => {})
+  const { procs, told } = seam({ Child: UnforkedChild })
+  assert.equal(await procs.start(notes), false)
+  const sentence = 'the backend process could not start: spawn EAGAIN'
+  assert.deepEqual(told, [['error', QID, sentence, 'load']])
+  assert.deepEqual(said.mock.calls.map((c) => c.arguments[0]), [`  ! ${QID}: backend failed to load — ${sentence}`])
   assert.deepEqual([...procs.ids()], [])
   procs.stopAll()
 })
