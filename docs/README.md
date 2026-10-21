@@ -87,9 +87,14 @@ A typical "production" folder sets something like `{ "hotReload": false, "auth":
 
 - `server.js` — runner, router, discovery, settings resolution (defaults ← config ← env), WebSocket multiplex (`/_atelier/ws`), hot-reload broadcaster, the auth slot, chrome-slot resolution.
 - `build.js` — build pipeline (esbuild JSX + Tailwind v4 + oxide).
+- `backend-procs.js` — the shell's side of a process per backend: starts, reloads and stops each module's process, restarts one that crashed or looped, and forwards the module's `/api/<ws>/<id>/…` lane to it.
 - `backend-host.js` — the process each module's backend runs in: mounts it with the scoped router and `ctx`, listens on a private socket the shell forwards to.
+- `frames.js` — every module on its own origin: the frame document, the frame's runtime and the chrome's stylesheet and kit for it, the module's own files and API, and a real-time channel carrying only its topic.
 - `frame.jsx` — the module's side of its frame, served on the module's own origin at `/_frame/frame.js`: `self`, `subscribe`, `useRoute`, the bridge.
-- `module-json.js` — reads a module's `module.json`.
+- `module-frame.jsx` — the page's side of a module's frame: the iframe and its bridge (route, title, theme, keys, dim).
+- `hosted.js` — the host switch (`hosted`): loads the host's file, and answers who the person is, the sidebar, the caller, nobody signed in, and the host's pages.
+- `host-pages.jsx` — the host's pages in the page: its sidebar entries, a page in the chrome's content area, and the sign-in page.
+- `module-json.js` — reads a module's `module.json`, and the shell's read of it beside a frontend's `meta`.
 - `discovery.js` — discovery rules (reserved names, workspaces) + `atelier.config.json` parsing.
 - `index.html` — template; React + ReactDOM UMD. A single inline rule resets margins and hints `color-scheme`; the shell paints zero pixels (no favicon, theme-color, or icon library — those belong to the chrome).
 - `client.jsx` — slim router + bundle loader + error fallback. Loads the chrome bundle (`chromeQid` resolved server-side) and renders it as the root; wires the WS multiplex + `window.__atelier.self` / `.subscribe`.
