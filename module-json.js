@@ -72,3 +72,17 @@ export function sidebarFields(declared) {
   for (const k of ['name', 'icon', 'group', 'color', 'primary']) if (declared[k] !== undefined) out[k] = declared[k];
   return out;
 }
+
+const reported = new Map();   // label → mtimeMs of the file whose problems were reported
+
+// The declaration as the shell reads it beside the frontend's `meta`: { meta, mtimeMs }, `meta` its sidebar fields,
+// which win over the frontend's where present (a module without a module.json keeps its `meta` as it is). Problems
+// (an unknown key, a value of the wrong kind) are reported once per edit of the file, under `label`.
+export function declaredMeta(dir, label) {
+  const d = readModuleJson(dir);
+  if (d.problems.length && reported.get(label) !== d.mtimeMs) {
+    reported.set(label, d.mtimeMs);
+    for (const p of d.problems) console.warn(`  ! ${label}/${MODULE_JSON}: ${p}`);
+  }
+  return { meta: sidebarFields(d.declared), mtimeMs: d.mtimeMs };
+}

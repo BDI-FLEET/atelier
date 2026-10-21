@@ -50,7 +50,7 @@ import { build as esbuildBuild } from 'esbuild';
 import { WebSocketServer } from 'ws';
 import { getJsx, getJsxBundle, getCss } from './build.js';
 import { resolveModuleChrome, missingChrome } from './chrome-resolve.js';
-import { readModuleJson, sidebarFields } from './module-json.js';
+import { declaredMeta } from './module-json.js';
 import { createFrames } from './frames.js';
 import { loadHost } from './hosted.js';
 import { createBackendProcs } from './backend-procs.js';
@@ -500,25 +500,12 @@ async function readMeta(src, label) {
   return sand.meta;
 }
 
-// module.json, the module's declaration, read beside the frontend's `meta`. Its name, icon, group, color and primary
-// win where present; a module without one keeps its `meta` as it is. Problems (an unknown key, a value of the
-// wrong kind) are reported once per edit of the file.
-const reportedModuleJson = new Map();   // qid → mtimeMs reported
-function moduleDeclaration(m) {
-  const d = readModuleJson(m.dir);
-  if (d.problems.length && reportedModuleJson.get(m.qualifiedId) !== d.mtimeMs) {
-    reportedModuleJson.set(m.qualifiedId, d.mtimeMs);
-    for (const p of d.problems) console.warn(`  ! ${m.qualifiedId}/module.json: ${p}`);
-  }
-  return d;
-}
-
 async function getModuleMeta(m) {
   if (!m.hasFrontend) return {};
   const src = path.join(m.dir, 'frontend.jsx');
   let mtimeMs;
   try { mtimeMs = fs.statSync(src).mtimeMs; } catch { return {}; }
-  const decl = moduleDeclaration(m);
+  const decl = declaredMeta(m.dir, m.qualifiedId);   // module.json, read beside the frontend's meta
   const key = `${mtimeMs}:${decl.mtimeMs}`;
   const cached = metaCache.get(m.qualifiedId);
   if (cached && cached.mtimeMs === key) return cached.meta;
@@ -528,7 +515,7 @@ async function getModuleMeta(m) {
   } catch (err) {
     console.warn(`  ! meta read failed for ${m.qualifiedId}: ${err.message}`);
   }
-  meta = { ...meta, ...sidebarFields(decl.declared) };
+  meta = { ...meta, ...decl.meta };
   metaCache.set(m.qualifiedId, { meta, mtimeMs: key });
   return meta;
 }
