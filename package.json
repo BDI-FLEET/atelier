@@ -50,6 +50,7 @@
     "limits.js",
     "frame.jsx",
     "frames.js",
+    "hosted.js",
     "ws-bridge.js",
     "module-json.js",
     "build.js",

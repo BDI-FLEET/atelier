@@ -52,8 +52,9 @@ import { getJsx, getJsxBundle, getCss } from './build.js';
 import { resolveModuleChrome, missingChrome } from './chrome-resolve.js';
 import { readModuleJson, sidebarFields } from './module-json.js';
 import { createFrames } from './frames.js';
-import { createRouter, bodyOf, headerObject, CALLER_HEADER, SHELL_HEADER, MODULE_ID } from './router.js';
-import { BACKEND_LOOP_MS, BACKEND_PING_MS, BACKEND_STOP_MS, BACKEND_RESTART_FIRST_MS, BACKEND_RESTART_MAX_MS, BACKEND_STEADY_MS, SOCKET_HASH_CHARS, PAGE_ICON_CHARS } from './limits.js';
+import { loadHost } from './hosted.js';
+import { createRouter, bodyOf, CALLER_HEADER, SHELL_HEADER } from './router.js';
+import { BACKEND_LOOP_MS, BACKEND_PING_MS, BACKEND_STOP_MS, BACKEND_RESTART_FIRST_MS, BACKEND_RESTART_MAX_MS, BACKEND_STEADY_MS, SOCKET_HASH_CHARS } from './limits.js';
 import {
   loadConfig, loadModuleConfig, shouldIncludeModule, collectConfigPaths, resolvePathEntry,
   CONFIG_FILENAME, resolveRoot,
@@ -117,9 +118,7 @@ const AUTH = (() => {                                     // auth module path/na
 const REVALIDATE_MS = Number(envOr('ATELIER_REVALIDATE_MS', 'revalidateMs', 30000)); // WS session re-check interval
 // The parent domain of every module's own origin (frames.js); unset: `*.localhost`.
 const FRAME_DOMAIN = envOr('ATELIER_FRAME_DOMAIN', 'frameDomain', null);
-// The host switch: a JS file the host names. When set, the shell trusts the caller header the host sets in front of
-// it, and takes from the file, when it exports them, who the person is (`person(req)`) and the sidebar
-// (`sidebar(req, person)`). Without it: a plain instance, and the caller header is ignored.
+// The host switch: a JS file the host names (hosted.js); unset: a plain instance.
 const HOSTED = envOr('ATELIER_HOSTED', 'hosted', null);
 
 // Publish the resolved port/host/baseUrl so modules (and processes they spawn)
@@ -141,51 +140,9 @@ if (!AUTH && !LOOPBACK_HOST) {
   console.warn(`  ! auth is off and baseUrl is ${BASE_URL} — this instance is ungated. Set "auth" in ${CONFIG_FILENAME} to gate it.`);
 }
 
-// The host's file, loaded once at boot. A host that names a file the shell cannot load stops the start: falling back
-// to "no host" would silently drop who the person is and where the sidebar comes from.
-let HOST_PERSON = null;    // (req) → { person, name } | null
-let HOST_SIDEBAR = null;   // (req, person) → [{ id, name, icon, origin, workspace? }]
-// The host's own pages (pages are the host's, apps are frames): `pages` maps a path to { title, file, icon?,
-// sidebar? } (each listed in the sidebar as an entry, in the order given, before the modules, unless sidebar: false), and the
-// one key `signIn` names the page shown, at whatever path was asked, when person() says nobody. A page is a React
-// component (the file's default export), written like a module frontend: JSX transformed per file, React from the page,
-// `@atelier/kit` from the chrome. It runs in the page itself, inside the chrome's content area, never in a frame. The
-// files live in one folder, served at /_atelier/pages/<name>.js to anyone (the sign-in page loads before a session).
-let HOST_PAGES = null;     // { paths: Map<path, { title, src }>, signIn: { title, src } | null, dir }
-const PAGE_ICON = new RegExp(`^[a-z0-9-]{1,${PAGE_ICON_CHARS}}$`);
-function loadHostPages(pages, base) {
-  const out = { paths: new Map(), signIn: null, dir: null };
-  for (const [key, def] of Object.entries(pages || {})) {
-    if (key !== 'signIn' && !/^\/[a-zA-Z0-9_\-/]*$/.test(key)) throw new Error(`pages: "${key}" is not a path (/…) or signIn`);
-    if (!def || typeof def.title !== 'string' || typeof def.file !== 'string') throw new Error(`pages: "${key}" needs { title, file }`);
-    const file = resolvePathEntry(def.file, base);
-    if (!file || !/\.jsx?$/.test(file) || !fs.existsSync(file)) throw new Error(`pages: "${key}": no .jsx or .js file at ${def.file}`);
-    const dir = path.dirname(file), name = path.basename(file).replace(/\.jsx?$/, '');
-    if (out.dir && out.dir !== dir) throw new Error(`pages: every page file lives in one folder (${out.dir}, not ${dir})`);
-    if (!/^[a-z0-9-]+$/.test(name)) throw new Error(`pages: "${key}": a file name is a-z, 0-9 and -`);
-    out.dir = dir;
-    if (def.icon !== undefined && (typeof def.icon !== 'string' || !PAGE_ICON.test(def.icon))) throw new Error(`pages: "${key}": icon is a lucide name (a-z, 0-9, -)`);
-    if (def.sidebar !== undefined && typeof def.sidebar !== 'boolean') throw new Error(`pages: "${key}": sidebar is true or false`);
-    // listed in the sidebar unless it says sidebar: false; its icon for the chrome's rail
-    const page = { title: def.title, src: `/_atelier/pages/${name}.js`, ...(def.icon ? { icon: def.icon } : {}), ...(def.sidebar === false ? { sidebar: false } : {}) };
-    if (key === 'signIn') out.signIn = page;
-    else out.paths.set(key.length > 1 ? key.replace(/\/+$/, '') : key, page);
-  }
-  return out;
-}
-if (HOSTED) {
-  const file = resolvePathEntry(String(HOSTED), ROOT);
-  try {
-    const hooks = await import(pathToFileURL(file).href);
-    if (typeof hooks.person === 'function') HOST_PERSON = hooks.person;
-    if (typeof hooks.sidebar === 'function') HOST_SIDEBAR = hooks.sidebar;
-    if (hooks.pages && typeof hooks.pages === 'object') HOST_PAGES = loadHostPages(hooks.pages, path.dirname(file));
-  } catch (err) {
-    console.error(`\n  hosted: could not load ${file}: ${err.message}\n`);
-    process.exit(1);
-  }
-  console.log(`  hosted by ${file}: the caller from ${CALLER_HEADER}${HOST_PERSON ? ', the person from person()' : ''}${HOST_SIDEBAR ? ', the sidebar from sidebar()' : ''}${HOST_PAGES ? `, its pages ${[...HOST_PAGES.paths.keys()].join(' ')}${HOST_PAGES.signIn ? ' and its sign-in' : ''}` : ''}`);
-}
+const host = HOSTED ? await loadHost(HOSTED, ROOT, {
+  mode: MODE, label: LABEL, serveIndex, serveAsset, getModules, getMetaByQId, resolveDefaultChromeQid, buildImportMap,
+}).catch((err) => { console.error(`\n  hosted: ${err.message}\n`); process.exit(1); }) : null;
 
 // Hoisted up here (out of the WS section below) because module mounting
 // happens at `await mountPendingBackends()` further down, and a module's
@@ -1566,7 +1523,7 @@ function walkJsxFiles(dir) {
 // identically; the scan no longer needs each module's meta.
 function cssScanSources() {
   const out = [path.join(HOST_DIR, 'client.jsx')];
-  if (HOST_PAGES?.dir) out.push(...walkJsxFiles(HOST_PAGES.dir));   // the host's pages draw with the chrome's classes
+  if (host?.pages?.dir) out.push(...walkJsxFiles(host.pages.dir));   // the host's pages draw with the chrome's classes
   for (const m of getModules()) {
     if (!m.hasFrontend) continue;
     out.push(...walkJsxFiles(m.dir));
@@ -1652,65 +1609,25 @@ function buildDefaultUser({ metaByQId } = {}) {
 // HTTP requests and WS upgrades; the upgrade path can't render handleUnauth's
 // HTML/JSON so it uses this directly and just drops the socket on null.
 async function gateRequest(req, defaultUser) {
-  let user;
-  if (HOST_PERSON) {
-    // The host's slot: who the person is. Nothing → not signed in. It replaces the auth module's authenticate.
-    let p = null;
-    try { p = await HOST_PERSON(req); }
-    catch (err) { console.error(`  ! hosted person() threw: ${err.message}`); return null; }
-    if (!p || p.person == null || p.person === '') return null;
-    req.__hostPerson = { person: String(p.person), name: p.name == null ? null : String(p.name) };
-    user = { id: req.__hostPerson.person, name: req.__hostPerson.name, workspaces: defaultUser.workspaces };
-    // the host's sign-out address, for the chrome's account menu; it is not the caller (ctx.caller stays who, nothing else)
-    if (typeof p.logout === 'string' && p.logout.startsWith('/')) user.logout = p.logout;
-  } else {
-    const auth = findAuthModule();
-    if (!auth) user = defaultUser;
-    else {
-      try { user = (await auth.plug.authenticate(req, defaultUser)) || null; }
-      catch (err) {
-        console.error(`  ! ${auth.m.qualifiedId}.authenticate threw: ${err.message}`);
-        return null;
-      }
-    }
+  if (host) return host.gate(req, defaultUser, authSlotGate);
+  return authSlotGate(req, defaultUser);
+}
+async function authSlotGate(req, defaultUser) {
+  const auth = findAuthModule();
+  if (!auth) return defaultUser;
+  try { return (await auth.plug.authenticate(req, defaultUser)) || null; }
+  catch (err) {
+    console.error(`  ! ${auth.m.qualifiedId}.authenticate threw: ${err.message}`);
+    return null;
   }
-  if (!user || !HOST_SIDEBAR) return user;
-  // The host's source for the sidebar: the modules this person sees, instead of the ones discovered in the folder.
-  return { ...user, workspaces: await sidebarWorkspaces(req, req.__hostPerson || { person: user.id, name: user.name ?? null }) };
 }
 
-// The host's sidebar list → the `user.workspaces` shape the chrome already draws. Each entry: { id, name?, icon?,
-// group?, origin?, workspace? }; `origin` is where the module's frame lives (under the host, not on this machine).
-async function sidebarWorkspaces(req, person) {
-  let list = [];
-  try { list = await HOST_SIDEBAR(req, person); }
-  catch (err) { console.error(`  ! hosted sidebar() threw: ${err.message}`); }
-  const byWs = new Map([[GLOBAL_WORKSPACE, []]]);
-  for (const e of Array.isArray(list) ? list : []) {
-    if (!e || typeof e.id !== 'string' || !MODULE_ID.test(e.id)) continue;
-    const ws = typeof e.workspace === 'string' && MODULE_ID.test(e.workspace) ? e.workspace : GLOBAL_WORKSPACE;
-    const meta = {};
-    for (const k of ['name', 'icon', 'group']) if (typeof e[k] === 'string') meta[k] = e[k];
-    const entry = { id: e.id, meta };
-    if (typeof e.origin === 'string') { try { const u = new URL(e.origin); if (/^https?:$/.test(u.protocol)) entry.origin = u.origin; } catch {} }
-    if (!byWs.has(ws)) byWs.set(ws, []);
-    byWs.get(ws).push(entry);
-  }
-  return [...byWs.entries()]
-    .sort(([a], [b]) => (a === GLOBAL_WORKSPACE ? -1 : b === GLOBAL_WORKSPACE ? 1 : a.localeCompare(b)))
-    .map(([id, modules]) => ({ id, modules }));
-}
-
-// ctx.caller: who is calling, as verified before the request reached the module, and nothing else about the person.
-//   • hosted: the host's header (base64url JSON, set after it verified the caller), else the person slot's answer;
-//   • not hosted: the gate's user ({ person, name }) when an auth module is configured, else null. The header is
-//     ignored, and removed before the request reaches the module, so nobody can spoof it on a plain instance.
+// ctx.caller: who is calling, as verified before the request reached the module, and nothing else about the person:
+// the host's word when hosted (hosted.js); else the gate's user ({ person, name }) when an auth module is configured,
+// else null. The caller header is ignored, and removed before the request reaches the module, so nobody can spoof it
+// on a plain instance.
 function callerFor(req, user) {
-  if (HOSTED) {
-    const raw = req.headers[CALLER_HEADER];
-    if (raw) return headerObject(raw);
-    return req.__hostPerson || null;
-  }
+  if (host) return host.callerFor(req);
   if (findAuthModule() && user && !user.anonymous) return { person: user.id ?? null, name: user.name ?? null };
   return null;
 }
@@ -1718,15 +1635,11 @@ function callerFor(req, user) {
 // Per-request auth gate. Returns the user object on allow, or null when
 // the auth module has already taken over the response (handleUnauth ran).
 // Callers should set req.user from the return value and proceed if non-null.
-async function authenticateRequest(req, res, defaultUser) {
+// `page`: the index template, when the page itself was asked for (a host may answer nobody with its sign-in page).
+async function authenticateRequest(req, res, defaultUser, page) {
   const user = await gateRequest(req, defaultUser);
   if (user) return user;
-  if (HOST_PERSON) {
-    // The host fills the person; when it has none, the shell says so and nothing more. Signing in is the host's page.
-    res.writeHead(401, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
-    res.end('not signed in');
-    return null;
-  }
+  if (host?.person) return host.notSignedIn(res, page);
   const auth = findAuthModule();
   if (!auth) return null;
   // Unauth → hand off to the auth module entirely. It owns status, body,
@@ -1831,21 +1744,6 @@ function buildImportMap(chromeQid) {
   return Object.keys(imports).length ? { imports } : null;
 }
 
-// The host's sign-in page for nobody: the chrome's stylesheet and kit (for its AuthLayout), the page, and nothing about
-// any module. 401, so a client that is not a browser still reads "not signed in".
-function serveSignedOut(req, res, template, metaByQId) {
-  const chromeQid = resolveDefaultChromeQid(metaByQId);
-  const chromeMod = chromeQid ? getModules().find((x) => x.qualifiedId === chromeQid) : null;
-  const importMap = buildImportMap(chromeQid);
-  const bootstrap = { mode: MODE, label: LABEL, signedOut: true, signIn: HOST_PAGES.signIn, chromeQid };
-  let html = template.replace('/*__ATELIER_BOOTSTRAP__*/', `window.__ATELIER__ = ${JSON.stringify(bootstrap).replace(/</g, '\\u003c')};`);
-  html = html.replace('<!--__ATELIER_IMPORTMAP__-->', importMap ? `<script type="importmap">${JSON.stringify(importMap)}</script>` : '');
-  html = html.replace('<!--__ATELIER_CHROME_STYLES__-->', chromeMod && fs.existsSync(path.join(chromeMod.dir, 'styles.css'))
-    ? `<link id="atelier-chrome-styles" rel="stylesheet" href="/modules/${chromeQid}/styles.css">` : '');
-  res.writeHead(401, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
-  res.end(html);
-}
-
 async function serveIndex(req, res) {
   // Auth runs FIRST. A logged-out visitor must NEVER see workspace info
   // leak in the bootstrap — the unauth handler owns the response and
@@ -1854,15 +1752,8 @@ async function serveIndex(req, res) {
   const metaByQId = await getMetaByQId();
 
   const defaultUser = buildDefaultUser({ metaByQId });
-  // Hosted with a sign-in page: nobody signed in gets the host's sign-in page, in the chrome's look, at the asked path.
-  let user;
-  if (HOST_PERSON && HOST_PAGES?.signIn) {
-    user = await gateRequest(req, defaultUser);
-    if (!user) return serveSignedOut(req, res, template, metaByQId);
-  } else {
-    user = await authenticateRequest(req, res, defaultUser);
-    if (!user) return;                  // unauth handler took over the response
-  }
+  const user = await authenticateRequest(req, res, defaultUser, template);
+  if (!user) return;                    // unauth handler took over the response
 
   // Workspace identity now lives in the URL path (`/<ws>/<id>`). No
   // canonicalization, no cookie — the client parses the URL on every
@@ -1883,8 +1774,7 @@ async function serveIndex(req, res) {
     chromeQid,
     defaultChromeQid,
     chromes: chromeQids(metaByQId),
-    // The host's own pages, by path: shown in the chrome's content area, not in a frame.
-    ...(HOST_PAGES ? { pages: [...HOST_PAGES.paths].map(([p, x]) => ({ path: p, ...x })) } : {}),
+    ...host?.bootstrap(),
     // Where each module this person sees is framed (a host's sidebar entry may carry its own `origin`, which wins).
     frames: frames.origins(user),
     // Seed only the backend errors this user can see — same per-module ACL as the
@@ -2425,8 +2315,8 @@ if (OBSERVE) setInterval(() => {
 
 const frames = createFrames({
   domain: FRAME_DOMAIN, port: PORT, baseUrl: BASE_URL, hostDir: HOST_DIR, observe: OBSERVE,
-  remotes: Boolean(HOST_SIDEBAR),
-  bounded: () => Boolean(findAuthModule() || HOST_PERSON || HOST_SIDEBAR),
+  remotes: Boolean(host?.sidebar),
+  bounded: () => Boolean(findAuthModule() || host?.person || host?.sidebar),
   getModules, getModuleMeta, getMetaByQId, resolveChromeForQid, walkJsxFiles, userModuleSet,
   authenticateRequest, buildDefaultUser, serveApiLane, serveAsset, resolveAssetSource,
 });
@@ -2529,32 +2419,8 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // The host's pages and, for its sign-in page before any session, the default chrome's stylesheet and kit: public,
-  // like the shell's own assets (the chrome is the look of the sign-in page, not a tenant's module).
-  if (HOST_PAGES) {
-    const pg = /^\/_atelier\/pages\/([a-z0-9-]+)\.js$/.exec(url.pathname);
-    if (pg) {
-      const src = ['.jsx', '.js'].map((e) => path.join(HOST_PAGES.dir, pg[1] + e)).find((f) => fs.existsSync(f));
-      if (!src) { res.writeHead(404); res.end('Not found'); return; }
-      await serveAsset(req, res, url, { kind: 'jsx', src });
-      return;
-    }
-    if (HOST_PAGES.signIn) {
-      const chromeQid = resolveDefaultChromeQid(await getMetaByQId());
-      if (chromeQid && (url.pathname === `/modules/${chromeQid}/styles.css` || url.pathname === `/modules/${chromeQid}/kit.js`)) {
-        await serveAsset(req, res, url);
-        return;
-      }
-    }
-  }
-
-  // Hosted with a sign-in page: a page asked by nobody gets the host's sign-in page at that path (serveIndex decides),
-  // rather than the gate's bare 401 below.
-  if (HOST_PERSON && HOST_PAGES?.signIn && req.method === 'GET' && !/^\/(api|assets|modules|_atelier)\//.test(url.pathname)
-      && /^\/[a-zA-Z0-9][a-zA-Z0-9_-]*(?:\/[a-zA-Z0-9][a-zA-Z0-9_-]*(?:\/.*)?)?\/?$/.test(url.pathname)) {
-    await serveIndex(req, res);
-    return;
-  }
+  // The host's pages, and what its sign-in page needs before any session.
+  if (host && await host.serve(req, res, url)) return;
 
   // Everything below — module assets and API — is auth-gated. Auth-gating
   // `/modules/*` closes a module-enumeration disclosure: without this, an
