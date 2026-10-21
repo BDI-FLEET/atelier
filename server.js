@@ -51,6 +51,7 @@ import { WebSocketServer } from 'ws';
 import { getJsx, getJsxBundle, getCss } from './build.js';
 import { resolveModuleChrome, missingChrome } from './chrome-resolve.js';
 import { readModuleJson, sidebarFields } from './module-json.js';
+import { createFrames } from './frames.js';
 import { createRouter, bodyOf, headerObject, CALLER_HEADER, SHELL_HEADER, MODULE_ID } from './router.js';
 import { BACKEND_LOOP_MS, BACKEND_PING_MS, BACKEND_STOP_MS, BACKEND_RESTART_FIRST_MS, BACKEND_RESTART_MAX_MS, BACKEND_STEADY_MS, SOCKET_HASH_CHARS, PAGE_ICON_CHARS } from './limits.js';
 import {
@@ -114,9 +115,7 @@ const AUTH = (() => {                                     // auth module path/na
   return (v === false || v == null || v === 'false' || v === 'off' || v === '') ? false : v;
 })();
 const REVALIDATE_MS = Number(envOr('ATELIER_REVALIDATE_MS', 'revalidateMs', 30000)); // WS session re-check interval
-// Frames: every module is shown in a frame on its own origin, `<id>.localhost:<port>` on a laptop (a workspace module:
-// `<id>.<workspace>.localhost`). `frameDomain` names another parent domain for a machine reached by name
-// (`<id>.<frameDomain>`, scheme and port from baseUrl); a wildcard DNS name for it points at the instance.
+// The parent domain of every module's own origin (frames.js); unset: `*.localhost`.
 const FRAME_DOMAIN = envOr('ATELIER_FRAME_DOMAIN', 'frameDomain', null);
 // The host switch: a JS file the host names. When set, the shell trusts the caller header the host sets in front of
 // it, and takes from the file, when it exports them, who the person is (`person(req)`) and the sidebar
@@ -1886,12 +1885,8 @@ async function serveIndex(req, res) {
     chromes: chromeQids(metaByQId),
     // The host's own pages, by path: shown in the chrome's content area, not in a frame.
     ...(HOST_PAGES ? { pages: [...HOST_PAGES.paths].map(([p, x]) => ({ path: p, ...x })) } : {}),
-    // Where each module this person sees is framed: its own origin on this machine. (A host's sidebar entry may
-    // carry its own `origin` instead, which wins.)
-    frames: (() => {
-      const visible = userModuleSet(user);
-      return Object.fromEntries(getModules().filter((m) => m.hasFrontend && visible.has(m.qualifiedId)).map((m) => [m.qualifiedId, frameOriginFor(m)]));
-    })(),
+    // Where each module this person sees is framed (a host's sidebar entry may carry its own `origin`, which wins).
+    frames: frames.origins(user),
     // Seed only the backend errors this user can see — same per-module ACL as the
     // live WS frames, so a page load never carries another tenant's error/stack.
     backendErrors: (() => {
@@ -2428,148 +2423,13 @@ if (OBSERVE) setInterval(() => {
   }
 }, 30_000).unref();
 
-// ------------------------------------------------------------------------
-// Frames — every module on its own origin.
-//
-// The instance serves the chrome, which shows every module in a frame on its own origin: an app on its own origin cannot
-// read the page, the sidebar or another app. On a laptop a module's origin is
-// `http://<id>.localhost:<port>` (a workspace module: `<id>.<workspace>.localhost`); browsers send every *.localhost
-// name to this machine, and the shell answers on the same port. On such a host it serves that module and nothing of
-// the shell: the frame document, the frame's runtime (React, frame.js: the module's half of the contract), the
-// chrome's stylesheet built over the chrome's and this module's classes (no other module's), the chrome's kit, the module's own files and API, and a
-// real-time channel carrying only its own topic. Everything else answers 404.
-// ------------------------------------------------------------------------
-
-const FRAME_SUFFIX = '.' + String(FRAME_DOMAIN || 'localhost').toLowerCase();
-const frameLabel = (m) => (m.workspace === GLOBAL_WORKSPACE ? m.id : `${m.id}.${m.workspace}`).toLowerCase();
-function frameOriginFor(m) {
-  if (!FRAME_DOMAIN) return `http://${frameLabel(m)}.localhost:${PORT}`;
-  const u = new URL(BASE_URL);
-  return `${u.protocol}//${frameLabel(m)}.${FRAME_DOMAIN}${u.port ? ':' + u.port : ''}`;
-}
-const hostnameOf = (h) => String(h || '').toLowerCase().replace(/:\d+$/, '');
-const isFrameHost = (req) => hostnameOf(req.headers.host).endsWith(FRAME_SUFFIX);
-// The module a frame host names, from discovery. Two modules with one label (ids differing only in case): neither
-// is framed, rather than the wrong one.
-function frameModuleFor(req) {
-  const name = hostnameOf(req.headers.host);
-  if (!name.endsWith(FRAME_SUFFIX)) return null;
-  const label = name.slice(0, -FRAME_SUFFIX.length);
-  const hits = getModules().filter((m) => m.hasFrontend && frameLabel(m) === label);
-  return hits.length === 1 ? hits[0] : null;
-}
-// A remote module: under a host, a sidebar entry whose `origin` is a frame host of this instance but no module found here
-// (the module runs elsewhere, on a computer the host reaches). On its origin the shell serves the frame's part, the frame
-// page, React, frame.js, the chrome's stylesheet and kit, and its real-time channel; the module's own paths
-// (`/api/<ws>/<id>/…`, `/modules/<ws>/<id>/…`) are the host's to answer before they reach the shell, and 404 here.
-function remoteFrameFor(req, user) {
-  if (!HOST_SIDEBAR || !user) return null;
-  const name = hostnameOf(req.headers.host);
-  for (const ws of user.workspaces || []) for (const m of ws.modules || []) {
-    if (!m.origin) continue;
-    let host;
-    try { host = new URL(m.origin).hostname.toLowerCase(); } catch { continue; }
-    if (host === name) return { qualifiedId: `${ws.id}/${m.id}`, workspace: ws.id, id: m.id, remote: true, name: m.meta?.name || m.id };
-  }
-  return null;
-}
-// Who may embed a frame: this instance's own page, reached as localhost, 127.0.0.1, [::1] or its baseUrl. A baseUrl on a
-// loopback name counts in all three spellings too: a browser on `localhost:<port>` may embed a frame of an instance whose
-// baseUrl says `127.0.0.1:<port>`, the same page under another name.
-const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]']);
-function parentOrigins() {
-  const set = new Set([`http://localhost:${PORT}`, `http://127.0.0.1:${PORT}`, `http://[::1]:${PORT}`]);
-  try {
-    const u = new URL(BASE_URL);
-    set.add(u.origin);
-    if (LOOPBACK.has(u.hostname) && u.protocol === 'http:') for (const h of LOOPBACK) set.add(`http://${h}:${u.port || 80}`);
-  } catch {}
-  return set;
-}
-const escHtml = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
-
-async function frameChromeFor(m) {
-  const metaByQId = await getMetaByQId();
-  const qid = resolveChromeForQid(metaByQId, m.qualifiedId);
-  return qid ? getModules().find((x) => x.qualifiedId === qid) || null : null;
-}
-
-async function serveFrameDocument(req, res, url, m) {
-  const meta = m.remote ? { name: m.name } : await getModuleMeta(m);
-  const parents = parentOrigins();
-  const asked = url.searchParams.get('atelier-parent');
-  const parent = asked && parents.has(asked) ? asked : null;   // the bridge talks to this exact origin, or to nobody
-  const chrome = await frameChromeFor(m);
-  const hasKit = chrome && (fs.existsSync(path.join(chrome.dir, 'kit.js')) || fs.existsSync(path.join(chrome.dir, 'kit.jsx')));
-  const hasStyles = chrome && fs.existsSync(path.join(chrome.dir, 'styles.css'));
-  const boot = { qid: m.qualifiedId, workspace: m.workspace, id: m.id, parent, title: meta.name || m.id, observe: OBSERVE };
-  const html = `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>${escHtml(boot.title)}</title>
-<style>html{color-scheme:light dark}html,body{margin:0}</style>
-${hasStyles ? '<link id="atelier-frame-styles" rel="stylesheet" href="/_frame/styles.css">' : ''}
-<style>html,html body,html.dark,html.dark body{background:transparent}</style>
-<script src="/_frame/react.js"></script>
-<script src="/_frame/react-dom.js"></script>
-<script>window.__ATELIER_FRAME__ = ${JSON.stringify(boot).replace(/</g, '\\u003c')};</script>
-${hasKit ? `<script type="importmap">${JSON.stringify({ imports: { '@atelier/kit': '/_frame/kit.js' } })}</script>` : ''}
-</head>
-<body>
-<div id="root"></div>
-<script type="module" src="/_frame/frame.js"></script>
-</body>
-</html>`;
-  res.writeHead(200, {
-    'Content-Type': 'text/html; charset=utf-8',
-    'Cache-Control': 'no-store',
-    // Only this instance's page may embed the frame.
-    'Content-Security-Policy': `frame-ancestors ${[...parents].join(' ')}`,
-  });
-  res.end(html);
-}
-
-async function serveFrameHost(req, res, url) {
-  let m = frameModuleFor(req);
-  const notFound = () => { res.writeHead(404, { 'Content-Type': 'text/plain' }); res.end('Not found'); };
-  if (!m && !HOST_SIDEBAR) return notFound();
-  const metaByQId = await getMetaByQId();
-  const user = await authenticateRequest(req, res, buildDefaultUser({ metaByQId }));
-  if (!user) return;
-  // a module that runs elsewhere, framed here because the host's sidebar names this origin for it
-  if (!m) m = remoteFrameFor(req, user);
-  if (!m) return notFound();
-  // The same boundary as the page's sidebar: a module that is not this person's is not there.
-  if ((findAuthModule() || HOST_PERSON || HOST_SIDEBAR) && !userModuleSet(user).has(m.qualifiedId)) return notFound();
-  req.user = user;
-  const own = `/${m.workspace}/${m.id}`;
-  const p = url.pathname;
-  if (req.method === 'GET' && (p === own || p.startsWith(own + '/'))) return serveFrameDocument(req, res, url, m);
-  if (m.remote && (p.startsWith(`/api${own}`) || p.startsWith(`/modules${own}/`))) return notFound();   // the host's
-  if (p.startsWith(`/api${own}/`) || p === `/api${own}`) {
-    if (!(await serveApiLane(req, res, url, user, metaByQId))) notFound();
-    return;
-  }
-  if (p.startsWith(`/modules${own}/`)) return serveAsset(req, res, url);
-  if (p.startsWith('/_frame/')) {
-    const name = p.slice('/_frame/'.length);
-    if (name === 'react.js' || name === 'react-dom.js') return serveAsset(req, res, url, resolveAssetSource(`/assets/${name}`));
-    if (name === 'frame.js') return serveAsset(req, res, url, { kind: 'pinned', src: path.join(HOST_DIR, 'frame.jsx') });
-    if (name === 'ws-bridge.js') return serveAsset(req, res, url, { kind: 'pinned', src: path.join(HOST_DIR, 'ws-bridge.js') });
-    const chrome = await frameChromeFor(m);
-    if (chrome && name === 'styles.css' && fs.existsSync(path.join(chrome.dir, 'styles.css'))) {
-      // a remote module's files are not on this machine: its frame gets the chrome's classes only
-      return serveAsset(req, res, url, { kind: 'css', src: path.join(chrome.dir, 'styles.css'), scan: [...walkJsxFiles(chrome.dir), ...(m.dir ? walkJsxFiles(m.dir) : [])], key: `frame:${m.qualifiedId}` });
-    }
-    if (chrome && name === 'kit.js') {
-      const kit = ['kit.jsx', 'kit.js'].map((f) => path.join(chrome.dir, f)).find((f) => fs.existsSync(f));
-      if (kit) return serveAsset(req, res, url, { kind: 'bundle', src: kit, root: chrome.dir });
-    }
-  }
-  return notFound();
-}
+const frames = createFrames({
+  domain: FRAME_DOMAIN, port: PORT, baseUrl: BASE_URL, hostDir: HOST_DIR, observe: OBSERVE,
+  remotes: Boolean(HOST_SIDEBAR),
+  bounded: () => Boolean(findAuthModule() || HOST_PERSON || HOST_SIDEBAR),
+  getModules, getModuleMeta, getMetaByQId, resolveChromeForQid, walkJsxFiles, userModuleSet,
+  authenticateRequest, buildDefaultUser, serveApiLane, serveAsset, resolveAssetSource,
+});
 
 // The module's API lane, `/api/<ws>/<id>/…`: the gate's two checks, then the module's process (or, for the gate's own
 // routes, the in-process router). Returns true when it answered.
@@ -2653,7 +2513,7 @@ const server = http.createServer(async (req, res) => {
   await mountPendingBackends();
 
   // A module's own origin: that module, nothing of the shell.
-  if (isFrameHost(req)) { await serveFrameHost(req, res, url); return; }
+  if (await frames.serve(req, res, url)) return;
 
   if (url.pathname === '/' || url.pathname === '/index.html') {
     await serveIndex(req, res);
@@ -2864,16 +2724,9 @@ server.on('upgrade', async (req, socket, head) => {
   if (pathname !== '/_atelier/ws') { socket.destroy(); return; }
 
   await mountPendingBackends();
-  // On a module's own origin the channel carries that module's topic only (a remote module's too: nothing of this
-  // instance publishes on it).
-  let frameMod = isFrameHost(req) ? frameModuleFor(req) : null;
-  if (isFrameHost(req) && !frameMod && !HOST_SIDEBAR) { socket.destroy(); return; }
-  let user = await gateRequest(req, buildDefaultUser({ metaByQId: await getMetaByQId() }));
-  if (isFrameHost(req) && !frameMod) {
-    frameMod = remoteFrameFor(req, user);
-    if (!frameMod) { socket.destroy(); return; }
-  }
-  if (user && frameMod && (findAuthModule() || HOST_PERSON || HOST_SIDEBAR) && !userModuleSet(user).has(frameMod.qualifiedId)) user = null;
+  const framed = await frames.channel(req, async () => gateRequest(req, buildDefaultUser({ metaByQId: await getMetaByQId() })));
+  if (!framed) { socket.destroy(); return; }
+  const { user, frameMod } = framed;
   if (!user) {
     try { socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n'); } catch {}
     socket.destroy();

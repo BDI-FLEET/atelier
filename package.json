@@ -49,6 +49,7 @@
     "router.js",
     "limits.js",
     "frame.jsx",
+    "frames.js",
     "ws-bridge.js",
     "module-json.js",
     "build.js",

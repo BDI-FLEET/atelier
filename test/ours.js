@@ -7,7 +7,7 @@ export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 
 export const FILES = [
   'agent-attach.js', 'agent.js', 'args.js', 'attach-client.js', 'attach.js', 'backend-host.js', 'clone.js',
-  'computers.js', 'config.js', 'create.js', 'data.js', 'files.js', 'frame.jsx', 'login-screen.js', 'login.js',
+  'computers.js', 'config.js', 'create.js', 'data.js', 'files.js', 'frame.jsx', 'frames.js', 'login-screen.js', 'login.js',
   'logout.js', 'logs.js', 'module-json.js', 'module-serve.js', 'modules-git.js', 'ops.js', 'ps.js', 'push.js',
   'releases.js', 'remote.js', 'repo.js', 'restart.js', 'router.js', 'run.js', 'sandbox.js', 'session.js',
   'whoami.js', 'ws-bridge.js',

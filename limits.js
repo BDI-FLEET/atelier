@@ -92,6 +92,9 @@ export const BACKEND_STEADY_MS = 60_000;
 /* The hex characters of a module's hash in its socket's file name: short, as a socket path is at most about 100 characters. */
 export const SOCKET_HASH_CHARS = 10;
 
+/* The port an http address means when it names none: a frame's parent on such an address is reached on it. */
+export const HTTP_PORT = 80;
+
 /* The longest icon name a page of the host declares (a lucide name). */
 export const PAGE_ICON_CHARS = 40;
 
