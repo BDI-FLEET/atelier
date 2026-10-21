@@ -95,6 +95,37 @@ A typical "production" folder sets something like `{ "hotReload": false, "auth":
 - `hosted.js` — the host switch (`hosted`): loads the host's file, and answers who the person is, the sidebar, the caller, nobody signed in, and the host's pages.
 - `host-pages.jsx` — the host's pages in the page: its sidebar entries, a page in the chrome's content area, and the sign-in page.
 - `module-json.js` — reads a module's `module.json`, and the shell's read of it beside a frontend's `meta`.
+- `router.js` — the router a module's backend is given, the same in the shell, in a backend's own process and in a computer's serving sandbox: scoped paths, `:params`, `req.json()`, `res.json()`.
+- `ws-bridge.js` — the real-time channel of the page and of a frame: one WebSocket per tab to its own origin's `/_atelier/ws`, many topics, `self` and `subscribe`.
+- `limits.js` — every wait, size and count the CLI, the backend processes and `module-serve.js` hold to, each named once with what it bounds.
+- `module-serve.js` — one module, headless: the process a host's computer runs for a module in a serving sandbox, answering its API, its frontend and its declared tools on one unix socket.
+- `session.js` — the CLI's session with a host: the credentials file, the call to the host, and the sentence every verb says for each kind of answer.
+- `args.js` — a verb's arguments: its options declared as data, read by one loop, its help rendered from the same data.
+- `repo.js` — the module folder's repository: the git remote that says where an app lives, `<host>/git/<computer>/<module>.git`, and the app's label.
+- `ops.js` — the client of the maintain verbs: an op asked of the host (inside a sandbox, of the computer's socket), its lines and output streamed back, one exit convention.
+- `sandbox.js` — inside a sandbox: the computer's socket, the one way out, which `push`, `clone` and the maintain verbs use in place of a session.
+- `login.js` — `atelier login`: signs in to a host by approving a code in the browser, and keeps the session for that host.
+- `login-screen.js` — the screen `atelier login` draws while it waits: the title, the scene, the link with the code, the code.
+- `whoami.js` — `atelier whoami`: who this machine acts as, on which host, with `--grants` and `--sessions`.
+- `logout.js` — `atelier logout`: ends the session on the host and forgets it here.
+- `computers.js` — `atelier computers`: the computers you hold a grant on.
+- `create.js` — `atelier create`: a module folder with its repository, its remote `atelier` set to your own computer.
+- `remote.js` — `atelier remote`: points this module at a computer you may maintain, `--name` for a second environment.
+- `clone.js` — `atelier clone`: an app's code from the host's git, never its data, with its remote set.
+- `push.js` — `atelier push`: a git push that makes the app live, its answer printed as `remote:` lines.
+- `releases.js` — `atelier releases`: what was live and when, from the host's record.
+- `logs.js` — `atelier logs`: the app's log, followed with `-f`.
+- `ps.js` — `atelier ps`: the live commit, awake or resting since when, the last request.
+- `restart.js` — `atelier restart`: the app stopped and started from the same commit.
+- `run.js` — `atelier run`: a command beside the live app, in its code, with its `data/` and config, and a terminal of its own when run from one.
+- `config.js` — `atelier config`: the app's settings and secrets, their values never shown.
+- `data.js` — `atelier data pull | push`: the live `data/` down into this folder, or this folder's up.
+- `files.js` — `atelier files push | pull | sync`: a folder to and from a computer's drive, only what differs moving.
+- `agent.js` — `atelier agent`, `agent new`, `agent primary`: the agents of a workspace.
+- `attach.js` — `atelier attach`: a terminal into a workspace's shell, through the host.
+- `agent-attach.js` — `atelier agent attach`: your terminal in front of an agent's live session.
+- `attach-client.js` — the one client of both attaches: the screen as the host streams it, the keys, the scrollback, the way out.
+- `modules-git.js` — `atelier add` and `atelier update` for a module that is a git repository: cloned into the instance, pulled forward.
 - `discovery.js` — discovery rules (reserved names, workspaces) + `atelier.config.json` parsing.
 - `index.html` — template; React + ReactDOM UMD. A single inline rule resets margins and hints `color-scheme`; the shell paints zero pixels (no favicon, theme-color, or icon library — those belong to the chrome).
 - `client.jsx` — slim router + bundle loader + error fallback. Loads the chrome bundle (`chromeQid` resolved server-side) and renders it as the root; wires the WS multiplex + `window.__atelier.self` / `.subscribe`.

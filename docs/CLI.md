@@ -1,7 +1,9 @@
 # The CLI and the host: the receiver contract
 
-What `atelier computers`, `atelier remote`, `atelier create`, `atelier push`, `atelier clone` and `atelier releases` ask of a host, and
-(below, *The maintain verbs, the agents and the files*) `logs`, `ps`, `restart`, `run`, `config`, `data`, `agent` and `files`. The CLI
+What `atelier computers` (computers.js), `atelier remote` (remote.js), `atelier create` (create.js), `atelier push` (push.js),
+`atelier clone` (clone.js) and `atelier releases` (releases.js) ask of a host, and (below, *The maintain verbs, the agents and the
+files*) `logs` (logs.js), `ps` (ps.js), `restart` (restart.js), `run` (run.js), `config` (config.js), `data` (data.js), `agent`
+(agent.js) and `files` (files.js), each through ops.js. The CLI
 is coded against exactly this; the host's receiver (the hook of the host's git) answers it. Every call but the git push carries the
 session header the other verbs send, `Authorization: Session <session>`, from `~/.config/atelier/credentials` for that
 host.
