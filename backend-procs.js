@@ -44,6 +44,11 @@ export function createBackendProcs(shell) {
   const SOCK_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'atelier-'));   // 0700: the sockets are the shell's alone
   let sockGen = 0;
   let loads = 0;
+  // qid → how many stops it has seen: a start or reload that began under an older count discards what it loaded.
+  const generations = new Map();
+  const generationOf = (qid) => { if (!generations.has(qid)) generations.set(qid, 0); return generations.get(qid); };
+  const advance = (qid) => generations.set(qid, generationOf(qid) + 1);
+  const stoppedSince = (qid) => { const gen = generationOf(qid); return () => generationOf(qid) !== gen; };
 
   function isGateModule(m) {
     if (!auth || m.workspace !== GLOBAL_WORKSPACE) return false;
@@ -161,11 +166,12 @@ export function createBackendProcs(shell) {
       shell.setError(qid, message, 'load');
       return false;
     };
+    const stopped = stoppedSince(qid);
     const r = await loadBackendProcess(m);
+    if (stopped()) { killBackend(r.b, 'SIGKILL'); return false; }
     if (r.error) return fail(r.error);
-    const e = backendProcs.get(qid);
-    if (e?.gone) { killBackend(r.b, 'SIGKILL'); return false; }
     const err = await mountBackendProcess(r.b);
+    if (stopped()) { stopBackend(r.b); return false; }
     if (err) return fail(err, r.b);
     if (!adoptBackend(m, r.b)) return false;
     shell.clearError(qid);
@@ -175,7 +181,9 @@ export function createBackendProcs(shell) {
 
   async function reloadBackendProcess(m) {
     const qid = m.qualifiedId;
+    const stopped = stoppedSince(qid);
     const r = await loadBackendProcess(m);
+    if (stopped()) { killBackend(r.b, 'SIGKILL'); return; }
     if (r.error) {
       const message = shell.enrichError(r.error, m.dir);
       if (shell.setError(qid, message, 'load')) console.error(`  ! ${qid}: reload failed, keeping current version — ${message}`);
@@ -184,6 +192,7 @@ export function createBackendProcs(shell) {
     const e = backendProcs.get(qid);
     if (e) { clearTimeout(e.restartTimer); e.restartTimer = null; await stopBackend(e.b); e.b = null; }
     const err = await mountBackendProcess(r.b);
+    if (stopped()) { stopBackend(r.b); return; }
     if (err) {
       killBackend(r.b, 'SIGKILL');
       const message = shell.enrichError(err, m.dir);
@@ -199,6 +208,7 @@ export function createBackendProcs(shell) {
   }
 
   async function stopBackendProcess(qid) {
+    advance(qid);
     const e = backendProcs.get(qid);
     if (!e) return;
     e.gone = true;
@@ -276,6 +286,7 @@ export function createBackendProcs(shell) {
      */
     stopAll() {
       const running = [...backendProcs.values()].filter((e) => e.b?.alive).length;
+      for (const qid of generations.keys()) advance(qid);
       for (const e of backendProcs.values()) { e.gone = true; clearTimeout(e.restartTimer); killBackend(e.b, 'SIGTERM'); }
       try { fs.rmSync(SOCK_DIR, { recursive: true, force: true }); } catch {}
       return running;
