@@ -79,13 +79,16 @@ console.log(`\n  instance: ${ROOT}`);
 
 /* ---- a module's repository (modules-git.js) ------------------------------------
  * update <module> pulls that clone; update alone pulls every clone with a
- * remote, then goes on to the collections below (if any are here). A name
- * that is no clone here is a collection's: the collection form below.
+ * remote, then goes on to the collections below (if any are here), a pull that
+ * failed failing the whole update. A name that is no clone here is a
+ * collection's: the collection form below.
  * ---------------------------------------------------------------------------- */
+let pullCode = 0;
 if (!mode && !cont && !abort) {
   const r = updateModules(ROOT, target);
   if (r && target) process.exit(r.code);
   if (r && r.pulled && !listCollections(ROOT).length) process.exit(r.code);
+  pullCode = r?.code ?? 0;
 }
 
 /* ---- installed modules, by provenance ------------------------------------------
@@ -310,7 +313,7 @@ const all = installedModules();
 const collections = wantColl ? [wantColl] : [...new Set(all.map((m) => m.prov.collection))].sort();
 if (!collections.length) {
   console.log(`  nothing to update — no installed modules carry provenance (installed via atelier add).\n`);
-  process.exit(0);
+  process.exit(pullCode);
 }
 let updated = 0, skipped = 0, staged = 0, failed = 0;
 
@@ -449,4 +452,4 @@ if (skipped) parts.push(`${skipped} skipped`);
 if (staged) parts.push(`${staged} staged for resolution`);
 if (failed) parts.push(`${failed} failed`);
 console.log(`\n  ${parts.length ? parts.join(', ') : 'everything up to date'}.\n`);
-process.exit(staged || failed ? 1 : 0);
+process.exit(staged || failed || pullCode ? 1 : 0);
