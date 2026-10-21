@@ -1,4 +1,4 @@
-// atelier run — a terminal of its own, exercised through the real CLI against an in-process fake of the host's three
+// atelier run (run.js, through the ops client in ops.js) — a terminal of its own, exercised through the real CLI against an in-process fake of the host's three
 // op routes (POST /api/ops, its stream, its /in). In a real terminal (a tmux pane) the CLI asks for a terminal, says its
 // size before anything draws, and the fake host draws a full-screen program's first frame at that size (the alternate
 // screen, a frame, the cursor home) the way the computer forwards a pane's bytes; a key goes as typed, one byte, no

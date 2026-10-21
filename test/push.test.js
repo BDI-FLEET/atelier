@@ -1,4 +1,5 @@
-// atelier create / remote / computers / push — exercised through the real CLI
+// atelier create / remote / computers / push (create.js, remote.js, computers.js, push.js, and inside a sandbox the
+// computer's socket through sandbox.js) — exercised through the real CLI
 // against an in-process fake host: the host's API (computers, the push token)
 // and a receiver that is git's own http-backend behind the token check, its
 // pre-receive hook printing the receiver's lines.

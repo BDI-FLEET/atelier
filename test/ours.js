@@ -14,6 +14,9 @@ export const FILES = [
   'repo.js', 'restart.js', 'router.js', 'run.js', 'sandbox.js', 'session.js', 'whoami.js', 'ws-bridge.js',
 ]
 
+/* Where the waits, sizes and counts of those files live: the one file of ours the measures over FILES leave out. */
+export const LIMITS = 'limits.js'
+
 export const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8')
 
 /* A file's lines of code, numbered from 1: comment lines left out. */

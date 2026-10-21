@@ -3,9 +3,7 @@
 // or a header they share is written once.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { FILES, read, codeLines } from './ours.js'
-
-const PLACE = 'limits.js'
+import { FILES, LIMITS as PLACE, read, codeLines } from './ours.js'
 
 const SHAPES = [
   ['a product of numbers', /\b\d[\d_]*\s*\*\s*\d/],

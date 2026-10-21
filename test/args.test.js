@@ -1,6 +1,7 @@
 // Every verb of the hosted CLI reads its arguments with one loop (args.js), its options declared as data: -h prints
 // the help rendered from them, the --host line said once from the default host, and an unknown option is refused the
-// same way by every verb, before anything is asked of a host.
+// same way by every verb, before anything is asked of a host. For agent.js, config.js, data.js, files.js, logs.js, ps.js,
+// releases.js and restart.js this is the only test: it pins their arguments, not what they answer.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'

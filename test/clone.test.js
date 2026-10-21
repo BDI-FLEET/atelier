@@ -1,4 +1,4 @@
-// atelier clone — a maintainer gets an app's code from the host's git, never its data. Exercised through the real CLI
+// atelier clone (clone.js) — a maintainer gets an app's code from the host's git, never its data. Exercised through the real CLI
 // against an in-process fake host: its API (computers, the clone token) and its git, git's own http-backend behind the
 // token check, as push.test.js fakes the receiver.
 import { test } from 'node:test'

@@ -1,4 +1,4 @@
-// atelier login / whoami / logout — the identity verbs, exercised through the
+// atelier login / whoami / logout (login.js, whoami.js, logout.js) — the identity verbs, exercised through the
 // real CLI against an in-process fake of the host API's routes: the session
 // kept private and never printed, whoami in words, sign-out ends it on the host.
 import { test } from 'node:test'

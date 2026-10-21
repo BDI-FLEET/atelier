@@ -1,4 +1,5 @@
-// Atelier behind a host: module.json, a process per backend, frames on their own origin, the caller.
+// Atelier behind a host: module.json, a process per backend, frames on their own origin with their runtime (frame.jsx),
+// the caller.
 // Each test is titled with the rule it protects. The instance is made in tmp here.
 import { test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
