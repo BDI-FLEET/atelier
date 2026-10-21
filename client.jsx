@@ -24,13 +24,10 @@
 
 import { resolveModuleChrome, missingChrome } from './chrome-resolve.js';
 import { wireWsBridge } from './ws-bridge.js';
+import { ModuleFrame } from './module-frame.js';
+import { pageEntries, hostPageFor, HostPage, SignedOut } from './host-pages.js';
 
 const { useState, useEffect, useRef } = React;
-
-/* The longest title a frame may give its page. */
-const FRAME_TITLE_CHARS = 200;
-/* The lowest a frame is drawn, however little room the window leaves it. */
-const FRAME_MIN_HEIGHT = 240;
 
 // What a chrome's `loadedModules` reads: modules run in their frames, so the page loads no module bundle.
 const NO_MODULE_BUNDLES = Object.freeze({});
@@ -236,172 +233,6 @@ function flattenUserModules(user) {
     }
   }
   return out;
-}
-
-/* =========================================================================
- * The frame — every module on its own origin.
- *
- * The module runs in an <iframe> on its own origin (window.__ATELIER__.frames, or a host's sidebar entry), so it
- * cannot read this page, the sidebar or another frame. The bridge is postMessage with the exact origin both ways:
- *   to the frame:   init { route, href, title, theme } · route { route, href } · theme { theme } · dim { on }
- *   from the frame: ready · route { route, replace } · title { title } · key { ⌘K or Esc, pressed in the frame }
- * This page owns the history: a route from the frame becomes a pushState here; back/forward goes down as a route.
- * The chrome renders the frame where it rendered the module; nothing in the chrome changes.
- * ========================================================================= */
-const themeNow = () => (document.documentElement.classList.contains('dark') ? 'dark' : 'light');
-
-function ModuleFrame({ qid, origin, route, title, onTitle }) {
-  const ref = useRef(null);
-  const [height, setHeight] = useState(null);
-  const [theme, setTheme] = useState(themeNow);
-  const [ws, id] = qid.split('/');
-  // The first address only; later routes travel by the bridge (a new src would reload the module).
-  const src = React.useMemo(() => {
-    const u = new URL(buildUrl(ws, id, route), origin);
-    u.searchParams.set('atelier-parent', window.location.origin);
-    return u.href;
-  }, [qid, origin]);
-  const routeRef = useRef(route);
-  routeRef.current = route;
-  const post = (type, data) => {
-    const w = ref.current?.contentWindow;
-    if (w) w.postMessage({ atelier: type, ...data }, origin);
-  };
-
-  // Messages from the frame: only from this frame's window, only from its origin.
-  useEffect(() => {
-    const onMsg = (e) => {
-      if (!ref.current || e.source !== ref.current.contentWindow || e.origin !== origin) return;
-      const d = e.data;
-      if (!d || typeof d !== 'object' || typeof d.atelier !== 'string') return;
-      if (d.atelier === 'ready') {
-        post('init', { route: routeRef.current, href: window.location.href, title, theme: themeNow() });
-      } else if (d.atelier === 'route' && typeof d.route === 'string') {
-        const target = buildUrl(ws, id, d.route);
-        if (target !== window.location.pathname) {
-          window.history[d.replace ? 'replaceState' : 'pushState'](null, '', target);
-          window.dispatchEvent(new CustomEvent('atelier:route'));
-        }
-      } else if (d.atelier === 'title' && typeof d.title === 'string') {
-        onTitle?.(d.title.slice(0, FRAME_TITLE_CHARS));
-      } else if (d.atelier === 'key' && (d.key === 'Escape' || d.key === 'k' || d.key === 'K')) {
-        // Handed to this page as if pressed here: the chrome's ⌘K palette, a dialog's Esc.
-        document.dispatchEvent(new KeyboardEvent('keydown', {
-          key: d.key, metaKey: !!d.metaKey, ctrlKey: !!d.ctrlKey, shiftKey: !!d.shiftKey, altKey: !!d.altKey,
-          bubbles: true, cancelable: true,
-        }));
-      }
-    };
-    window.addEventListener('message', onMsg);
-    return () => window.removeEventListener('message', onMsg);
-  }, [qid, origin, title]);
-
-  // Back/forward or a deep link changed the route here → down to the frame.
-  useEffect(() => { post('route', { route, href: window.location.href }); }, [route]);
-
-  // The theme follows the page's: the chrome marks it on <html>.
-  useEffect(() => {
-    let last = themeNow();
-    const mo = new MutationObserver(() => { const t = themeNow(); if (t !== last) { last = t; setTheme(t); post('theme', { theme: t }); } });
-    mo.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
-    return () => mo.disconnect();
-  }, [origin]);
-
-  // Dim for a modal: a dialog of the page makes the rest inert (or aria-hidden); the frame is told.
-  useEffect(() => {
-    let last = false;
-    const check = () => {
-      const on = !!ref.current?.closest('[inert],[aria-hidden="true"]');
-      if (on !== last) { last = on; post('dim', { on }); }
-    };
-    const mo = new MutationObserver(check);
-    mo.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['inert', 'aria-hidden'] });
-    return () => mo.disconnect();
-  }, [origin]);
-
-  // The frame fills the content area down to the bottom of the window; the module scrolls inside it.
-  React.useLayoutEffect(() => {
-    const measure = () => {
-      const el = ref.current;
-      if (!el) return;
-      let below = 0;
-      for (let n = el.parentElement; n && n !== document.body; n = n.parentElement) {
-        const cs = getComputedStyle(n);
-        below += parseFloat(cs.paddingBottom) + parseFloat(cs.borderBottomWidth);
-      }
-      const top = el.getBoundingClientRect().top + window.scrollY;
-      setHeight(Math.max(FRAME_MIN_HEIGHT, Math.floor(window.innerHeight - top - below)));
-    };
-    measure();
-    window.addEventListener('resize', measure);
-    const ro = new ResizeObserver(measure);
-    ro.observe(document.body);
-    return () => { window.removeEventListener('resize', measure); ro.disconnect(); };
-  }, [qid]);
-
-  return React.createElement('iframe', {
-    ref,
-    src,
-    title: title || qid,
-    'data-atelier-frame': qid,
-    style: { display: 'block', width: '100%', height: height ? `${height}px` : '70vh', border: 0, background: 'transparent', colorScheme: theme },   // the frame's scheme, so its page stays see-through
-  });
-}
-
-/* =========================================================================
- * The host's pages — pages are the host's own, apps are frames. A page is the host's React component (its file's
- * default export, JSX transformed per file like a module frontend, React from this page, `@atelier/kit` from the
- * chrome), rendered here, in the page, inside the chrome's content area. Props: { user, path, navigate(path) }.
- * ========================================================================= */
-const hostPageCache = new Map();   // src → Promise<component>
-function loadHostPage(src) {
-  if (!hostPageCache.has(src)) hostPageCache.set(src, import(src).then((m) => {
-    if (typeof m.default !== 'function') throw new Error(`${src} has no default export`);
-    return m.default;
-  }));
-  return hostPageCache.get(src);
-}
-/**
- * The host's pages as sidebar entries, Home first: each page the host did not mark `sidebar: false`, in the host's
- * order, as a rail item of the workspace on screen, its qid its path without the leading slash (the chrome links an
- * item to `/<qid>`: Home's is ''), `meta.primary` so a chrome that puts primary items first puts them before the apps,
- * `page` its path. Never a module, never a frame: navigate() takes a page's qid to its path.
- */
-function pageEntries(workspace) {
-  return (window.__ATELIER__?.pages || []).filter((p) => p.sidebar !== false).map((p, i) => ({
-    id: `page:${p.path}`, qid: p.path.slice(1), workspace: workspace || '', hasFrontend: true, origin: null, page: p.path,
-    meta: { name: p.title, icon: p.icon || 'file', primary: true, order: i },
-  }));
-}
-/** The host page for a path, from the bootstrap: an exact match ('/x/' is '/x'). */
-function hostPageFor(pathname) {
-  const p = pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname;
-  return (window.__ATELIER__?.pages || []).find((x) => x.path === p) || null;
-}
-function HostPage({ page, props }) {
-  const [state, setState] = useState({ kind: 'loading' });
-  useEffect(() => {
-    let live = true;
-    setState({ kind: 'loading' });
-    loadHostPage(page.src).then((C) => { if (live) setState({ kind: 'ok', C }); }, (err) => { if (live) setState({ kind: 'error', err }); });
-    return () => { live = false; };
-  }, [page.src]);
-  if (state.kind === 'loading') return null;
-  if (state.kind === 'error') return React.createElement('pre', { style: { whiteSpace: 'pre-wrap' } }, `${page.path || 'page'} · failed to load\n${state.err?.message || state.err}`);
-  return React.createElement(state.C, props);
-}
-
-/** Nobody signed in, hosted: the host's sign-in page in the chrome's AuthLayout (from its kit), at the asked path. */
-function SignedOut() {
-  const page = window.__ATELIER__.signIn;
-  const [Layout, setLayout] = useState(null);
-  useEffect(() => {
-    document.title = `${page.title} — Atelier`;
-    import('@atelier/kit').then((k) => setLayout(() => (typeof k.AuthLayout === 'function' ? k.AuthLayout : 'main')), () => setLayout(() => 'main'));
-  }, []);
-  if (!Layout) return null;
-  // signed in: the asked page again, now with a person
-  return React.createElement(Layout, null, React.createElement(HostPage, { page, props: { user: null, path: window.location.pathname, navigate: (to) => window.location.assign(to), signedIn: () => window.location.reload() } }));
 }
 
 /* =========================================================================
@@ -814,6 +645,7 @@ function App() {
         route: urlState.rest,
         title: activeMod.meta?.name || activeMod.id,
         onTitle: setFrameTitle,
+        buildUrl,
       }),
     };
   }

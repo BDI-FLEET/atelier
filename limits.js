@@ -1,6 +1,6 @@
 /* atelier · every wait, size and count the CLI, the shell's backend processes and module-serve hold to, named once.
- * The page's own (ws-bridge.js, client.jsx) are named beside what they bound: the browser loads those files one by
- * one, and this one is not served to it. */
+ * The page's own (ws-bridge.js, module-frame.jsx) are named beside what they bound: the browser loads those files one
+ * by one, and this one is not served to it. */
 
 /* The host a machine signs in to when none is named: the port the host listens on in development. */
 export const DEV_HOST_PORT = 4350;

@@ -154,7 +154,7 @@ export const pages = { '/': { title: 'Home', file: './pages/home.jsx', icon: 'ho
     const b = bootOf(await (await fetch(hosted.base + '/activate', { headers: cookie })).text())
     assert.deepEqual(b.pages.map((p) => p.path).sort(), ['/', '/activate'])
     assert.deepEqual(b.pages.find((p) => p.path === '/activate'), { path: '/activate', title: 'Activate', src: '/_atelier/pages/activate.js', sidebar: false })
-    // a page is a sidebar entry unless it says not, with its icon; the client lists them before the apps (client.jsx pageEntries)
+    // a page is a sidebar entry unless it says not, with its icon; the client lists them before the apps (host-pages.jsx pageEntries)
     assert.deepEqual(b.pages.find((p) => p.path === '/'), { path: '/', title: 'Home', src: '/_atelier/pages/home.js', icon: 'house' })
     assert.equal(b.user.logout, '/out')
     assert.ok(Object.keys(b.frames).every((q) => /^global\//.test(q)) && !Object.values(b.frames).some((o) => /home|activate|signin/.test(o)))

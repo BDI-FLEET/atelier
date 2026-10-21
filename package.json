@@ -58,6 +58,8 @@
     "discovery.js",
     "chrome-resolve.js",
     "client.jsx",
+    "module-frame.jsx",
+    "host-pages.jsx",
     "index.html",
     "shims",
     "docs"
