@@ -106,7 +106,7 @@ test('from a terminal, atelier run gets a terminal of its own: it asks for one, 
   }
 })
 
-test('on pipes, atelier run asks for no terminal: what is piped in goes as it comes, its end the command\'s end of input; --tty asks for one anyway, at 80×24 without a terminal to measure', async () => {
+test('on pipes atelier run asks for no terminal and sends what is piped in as it comes, its end the command\'s end of input, while --tty asks for one anyway at 80×24 without a terminal to measure', async () => {
   for (const [flags, tty] of [[[], false], [['--tty'], true]]) {
     const host = await fakeHost()
     try {

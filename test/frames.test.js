@@ -42,7 +42,7 @@ function get(port, host, p, headers = {}) {
 const boot = async () => JSON.parse((await (await fetch(server.base + '/')).text()).match(/window\.__ATELIER__ = (\{.*?\});/)[1])
 const entry = (b, id) => b.user.workspaces.find((w) => w.id === 'global').modules.find((m) => m.id === id)
 
-test('a module without module.json runs as before', async () => {
+test('a module without module.json runs on its meta, and a module.json names its module and reports an unknown key', async () => {
   const b = await boot()
   assert.deepEqual(entry(b, 'plain').meta, { name: 'Plain', icon: 'leaf' })   // its meta, untouched
   const r = await fetch(server.base + '/api/global/plain/who')
@@ -114,7 +114,7 @@ test('a frame cannot be embedded by another page, and its bridge answers only th
   assert.doesNotMatch(foreign.headers['content-security-policy'], /evil/)
 })
 
-test('without a host the caller header is ignored', async () => {
+test('the caller header is ignored without a host and is ctx.caller under one', async () => {
   const spoof = Buffer.from(JSON.stringify({ person: 'mallory' })).toString('base64url')
   const plain = await (await fetch(server.base + '/api/global/plain/who', { headers: { 'x-atelier-caller': spoof } })).json()
   assert.equal(plain.caller, null)

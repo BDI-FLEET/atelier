@@ -138,7 +138,7 @@ function moduleFolder(h, remote) {
   return dir
 }
 
-test('a push is a git push with a one-push token; the answer is printed as remote: lines and the exit code says what happened', async () => {
+test('a push is a git push with a one-push token whose answer is printed as remote: lines, a refused release exits 1 with the live commit kept, and going back is a push of an older commit', async () => {
   const host = await fakeHost()
   const h = home(host.url)
   try {
@@ -177,7 +177,7 @@ test('a push is a git push with a one-push token; the answer is printed as remot
   } finally { await host.close() }
 })
 
-test('the exit codes are one convention for every verb: 2 written wrongly, 3 not signed in, 4 the grant is missing', async () => {
+test('push, remote and computers keep the one exit convention: 2 written wrongly, 3 not signed in before anything is asked, 4 the grant is missing before any git request', async () => {
   const host = await fakeHost()
   try {
     const h = home(host.url)

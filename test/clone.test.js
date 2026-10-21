@@ -115,7 +115,7 @@ function cli(h, args, host, extra) {
   })
 }
 
-test('a maintainer clones an app from the host\'s git: a clone token through the same one-off helper as a push, the remote atelier to its computer, a .gitignore for data/; one line, the token nowhere', async () => {
+test('a maintainer clones an app from the host\'s git with a clone token through the same one-off helper as a push, gets the remote atelier to its computer and a .gitignore for data/, and is told in one line with the token nowhere', async () => {
   const host = await fakeHost()
   const h = home(host.url)
   try {
@@ -144,7 +144,7 @@ test('a maintainer clones an app from the host\'s git: a clone token through the
   } finally { await host.close() }
 })
 
-test('refused with the host\'s sentence when the person may not maintain the app (4); one answer for an app that is not there; 2 for a folder that exists or an app on two computers; 3 not signed in; a sandbox has its clone tool', async () => {
+test('clone exits 4 with the host\'s one sentence for an app the person may not maintain or that is not there, 2 for a folder that exists or an app on two computers, 3 when not signed in, and inside a sandbox points to the clone tool', async () => {
   const host = await fakeHost()
   try {
     const h = home(host.url)

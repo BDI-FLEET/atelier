@@ -193,7 +193,7 @@ test('agent attach writes by default (talking to an agent and attaching to it ar
 })
 
 
-test('agent attach --write says the default out loud: the same write; --write and --watch together are written wrongly', async () => {
+test('agent attach --write says the default out loud and --write with --watch is written wrongly', async () => {
   const host = await fakeHost()
   try {
     const a = attach(signedInHome(host.url), ['k1/main', '--write', '--host', host.url])
@@ -229,7 +229,7 @@ test('agent attach --watch shows the screen without input: keys are never sent',
 })
 
 
-test('the names default: alone is the remote computer\'s main, a bare name a computer, /name a workspace on the remote; with several computers and no remote, a refusal that names them and atelier remote', async () => {
+test('the names default to the remote computer\'s main alone, a computer for a bare name and a workspace on the remote for /name, and with several computers and no remote the refusal names them and atelier remote', async () => {
   const host = await fakeHost({ computers: TWO })
   /* What the CLI asked to attach to, for these words, run in this folder; or how it was refused. */
   const asks = async (args, cwd, verb = undefined) => {
@@ -286,7 +286,7 @@ test('a revoked session closes the attach: exit 1 with the host\'s sentence', as
 })
 
 
-test('attach: a shell into the workspace, onto the shell; a line someone else typed shows their name, yours does not; Ctrl-] detaches with the sentence and exits 0', async () => {
+test('attach puts the terminal onto the workspace\'s shell, shows the name in front of a line someone else typed and not in front of yours, and Ctrl-] detaches with the sentence and exit 0', async () => {
   const host = await fakeHost()
   try {
     const a = attach(signedInHome(host.url), ['k1/main', '--host', host.url], ['attach'])
@@ -358,7 +358,7 @@ const plain = (s) => s.replace(/\x1b\[[0-9;?<]*[ -/]*[@-~]/g, '')
 const lastFooter = (out) => plain([...out.matchAll(/\x1b\[7m(.*?)\x1b\[0m/g)].at(-1)?.[1] ?? '').trim()
 const lastRows = (out) => plain(out.split('\x1b[?25l').at(-1) ?? '')
 
-test('the wheel scrolls the view, three rows a notch, on the agent\'s session as on the shell, watching or not: each notch a scroll of 3, never a key; a click is dropped; the footer says how far up; new output does not pull the view down; scrolling back down to the bottom follows the pane again', async () => {
+test('the wheel scrolls the view three rows a notch on the agent\'s session as on the shell, watching or not, never as a key, with a click dropped, the footer saying how far up, new output never pulling the view down, and the bottom following the pane again', async () => {
   for (const [verb, args] of [[['agent', 'attach'], ['--watch']], [['attach'], []]]) {
     const host = await fakeHost({ handover: false })
     try {

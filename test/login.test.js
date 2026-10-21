@@ -129,7 +129,7 @@ test('the credentials live under XDG_CONFIG_HOME when it is set, else under ~/.c
   } finally { await host.close() }
 })
 
-test('whoami says in words who this machine acts as and where; never a raw grant line, never the session', async () => {
+test('whoami says in words who this machine acts as and where, never with a raw grant line or the session', async () => {
   const host = await fakeHost()
   const home = tmpHome()
   try {
@@ -175,7 +175,7 @@ test('atelier login without a number activates through the portal and stores the
   } finally { await host.close() }
 })
 
-test('the login screen: the title, a horse in block characters, the link with the code, the code; --plain the words alone', async () => {
+test('the login screen draws the title, a horse in block characters, the link with the code and the code, and with --plain the words alone', async () => {
   const link = 'http://127.0.0.1:4350/activate?code=DOJ83-KKIUQ'
   const drawn = screen({ version: '0.22.0', host: 'http://127.0.0.1:4350', link, code: 'DOJ83-KKIUQ', opened: true, canCopy: true, art: true })
   const bare = drawn.replace(/\x1b\[[0-9;]*m/g, '')
