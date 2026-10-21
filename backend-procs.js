@@ -19,7 +19,8 @@
  * shell's trusted layer, not a feature module.
  *
  * server.js hands `createBackendProcs` what a process is started with (its folder, the instance's settings, the
- * configured auth module, the bundler) and where its news goes (the module's topic, the backend-error state).
+ * configured auth module, the bundler) and where its news goes (the module's topic, the backend-error state). `fork`,
+ * when given, stands for node's own.
  */
 
 import fs from 'node:fs';
@@ -37,10 +38,12 @@ const exitWords = (b, r) => b.crashMessage || `the backend process ended (${r.si
 
 export function createBackendProcs(shell) {
   const { hostDir, auth, label, port, host, baseUrl } = shell;
+  const forkProcess = shell.fork ?? fork;
   const backendProcs = new Map();       // qid → { m, b (current process or null), backoff, upSince, restartTimer, gone }
   const BACKEND_HOST = path.join(hostDir, 'backend-host.js');
   const SOCK_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'atelier-'));   // 0700: the sockets are the shell's alone
   let sockGen = 0;
+  let loads = 0;
 
   function isGateModule(m) {
     if (!auth || m.workspace !== GLOBAL_WORKSPACE) return false;
@@ -49,11 +52,11 @@ export function createBackendProcs(shell) {
   }
 
   // Fork one process for module m and hand it the bundled code. Returns the handle; `wait(types)` resolves with the
-  // next message of those types, or { type: 'exit' } if the process ends first.
-  function forkBackend(m, code) {
+  // next message of those types, or { type: 'exit' } if the process ends first. `order` says when its load began.
+  function forkBackend(m, code, order) {
     const socketPath = path.join(SOCK_DIR, `${crypto.createHash('sha1').update(m.qualifiedId).digest('hex').slice(0, SOCKET_HASH_CHARS)}-${++sockGen}.sock`);
-    const child = fork(BACKEND_HOST, [], { stdio: ['ignore', 'inherit', 'inherit', 'ipc'] });
-    const b = { m, child, socketPath, alive: true, crashMessage: null, lastPong: Date.now(), stopping: false, loop: false, onExit: null, _wait: null };
+    const child = forkProcess(BACKEND_HOST, [], { stdio: ['ignore', 'inherit', 'inherit', 'ipc'] });
+    const b = { m, child, socketPath, order, alive: true, crashMessage: null, lastPong: Date.now(), stopping: false, loop: false, onExit: null, _wait: null };
     b.wait = (types) => new Promise((res) => { b._wait = { types, res }; });
     child.on('message', (msg) => {
       if (!msg || typeof msg !== 'object') return;
@@ -83,9 +86,10 @@ export function createBackendProcs(shell) {
 
   // Bundle and load module m in a new process, not yet mounted. → { b } or { error }
   async function loadBackendProcess(m) {
+    const order = ++loads;
     let code;
     try { code = await shell.bundle(m); } catch (err) { return { error: err?.message || String(err) }; }
-    const b = forkBackend(m, code);
+    const b = forkBackend(m, code, order);
     const r = await b.wait(['loaded', 'load-error']);
     if (r.type === 'loaded') return { b };
     return { error: r.type === 'load-error' ? r.message : exitWords(b, r) };
@@ -113,9 +117,18 @@ export function createBackendProcs(shell) {
     });
   }
 
+  // An entry holds one live process. When a start and a reload (or two reloads) race here, the process whose load began
+  // last is kept, as it read the newest code, and the other is stopped. → the entry, or null when b is the one stopped.
   function adoptBackend(m, b) {
     let e = backendProcs.get(m.qualifiedId);
     if (!e) { e = { m, b: null, backoff: 0, upSince: 0, restartTimer: null, gone: false }; backendProcs.set(m.qualifiedId, e); }
+    const held = e.b?.alive && e.b !== b ? e.b : null;
+    if (held) {
+      const [kept, dropped] = held.order > b.order ? [held, b] : [b, held];
+      console.error(`  ! ${m.qualifiedId}: two processes after a race · kept pid ${kept.child.pid}, its load began last · stopped pid ${dropped.child.pid}`);
+      stopBackend(dropped);
+      if (kept === held) return null;
+    }
     e.m = m;
     e.b = b;
     e.upSince = Date.now();
@@ -154,7 +167,7 @@ export function createBackendProcs(shell) {
     if (e?.gone) { killBackend(r.b, 'SIGKILL'); return false; }
     const err = await mountBackendProcess(r.b);
     if (err) return fail(err, r.b);
-    adoptBackend(m, r.b);
+    if (!adoptBackend(m, r.b)) return false;
     shell.clearError(qid);
     console.log(`  + ${verb} ${qid} backend · pid ${r.b.child.pid}`);
     return true;
@@ -179,6 +192,7 @@ export function createBackendProcs(shell) {
       return;
     }
     const ne = adoptBackend(m, r.b);
+    if (!ne) return;
     ne.backoff = 0;
     shell.clearError(qid);
     console.log(`  ↻ reloaded ${qid} backend · pid ${r.b.child.pid}`);
