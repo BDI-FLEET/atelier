@@ -45,6 +45,7 @@
     "gate.js",
     "server.js",
     "backend-host.js",
+    "backend-procs.js",
     "module-serve.js",
     "router.js",
     "limits.js",

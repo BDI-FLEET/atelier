@@ -44,7 +44,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import zlib from 'node:zlib';
 import { createRequire } from 'node:module';
-import { execFile, fork } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { build as esbuildBuild } from 'esbuild';
 import { WebSocketServer } from 'ws';
@@ -53,8 +53,8 @@ import { resolveModuleChrome, missingChrome } from './chrome-resolve.js';
 import { readModuleJson, sidebarFields } from './module-json.js';
 import { createFrames } from './frames.js';
 import { loadHost } from './hosted.js';
-import { createRouter, bodyOf, CALLER_HEADER, SHELL_HEADER } from './router.js';
-import { BACKEND_LOOP_MS, BACKEND_PING_MS, BACKEND_STOP_MS, BACKEND_RESTART_FIRST_MS, BACKEND_RESTART_MAX_MS, BACKEND_STEADY_MS, SOCKET_HASH_CHARS } from './limits.js';
+import { createBackendProcs } from './backend-procs.js';
+import { createRouter, bodyOf } from './router.js';
 import {
   loadConfig, loadModuleConfig, shouldIncludeModule, collectConfigPaths, resolvePathEntry,
   CONFIG_FILENAME, resolveRoot,
@@ -584,6 +584,7 @@ const attemptedBackends = new Set(); // id → tried once via mountPendingBacken
 const backendWatchers = new Map();   // id → fs.FSWatcher
 const pendingReloads = new Map();    // id → debounce timer
 const lastReloadMtime = new Map();   // id → mtimeMs actually processed
+const mountingBackends = new Map();  // id → promise of a mount in flight
 
 // Cross-module slot registry. Each `(workspace, id)` pair maps to a plain
 // object that any module within the same workspace can read or write to.
@@ -674,9 +675,6 @@ async function bundleBackend(m) {
   return result.outputFiles[0].text;
 }
 
-// The configured auth module (the gate) is the one backend that stays in the shell's process: the shell calls its
-// `authenticate` / `authorize` / `handleUnauth` on every request and `handleUnauth` owns the response. It is the
-// shell's trusted layer, not a feature module. Every other backend runs as its own process (below).
 async function importBackend(m) {
   const code = await bundleBackend(m);
   // Salt every load with a URL fragment: Node's ESM loader caches by full
@@ -752,237 +750,14 @@ function clearBackendError(qid) {
 }
 const loadFailed = (qid) => backendErrors.get(qid)?.kind === 'load';
 
-// ------------------------------------------------------------------------
-// A process per backend.
-//
-// The shell starts each module's backend as its own node process: a module that crashes or loops takes down its own
-// process and nothing else. Each backend.js is bundled here and handed to a fresh node
-// process running backend-host.js, which mounts it with the same router and ctx and listens on a unix socket in a
-// folder only this user can open. The shell proxies the module's `/api/<ws>/<id>/…` lane to that socket and relays
-// its `ctx.broadcast` (IPC) onto the module's real-time topic.
-//
-//   • A crash (an uncaught throw, process.exit, out of memory) ends that process: the shell logs one line, the
-//     module's lane answers 500 with the error, and a fresh process starts after BACKEND_RESTART_FIRST_MS, the wait
-//     doubling up to BACKEND_RESTART_MAX_MS; it starts over once a process has stayed up BACKEND_STEADY_MS.
-//   • A loop: the shell pings every process every BACKEND_PING_MS; one that has not answered for LOOP_MS is killed, then
-//     restarted the same way.
-//   • A save restarts that module's process alone: the new code loads in a new process first; if it fails, the old
-//     one keeps serving. If it loads, the old process tears down, then the new one mounts.
-// ------------------------------------------------------------------------
-
-const backendProcs = new Map();       // qid → { m, b (current process or null), backoff, upSince, restartTimer, gone }
-const mountingBackends = new Map();   // qid → promise of a mount in flight
-const BACKEND_HOST = path.join(HOST_DIR, 'backend-host.js');
-const LOOP_MS = Number(process.env.ATELIER_BACKEND_LOOP_MS || BACKEND_LOOP_MS);
-const SOCK_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'atelier-'));   // 0700: the sockets are the shell's alone
-let sockGen = 0;
-
-function isGateModule(m) {
-  if (!AUTH || m.workspace !== GLOBAL_WORKSPACE) return false;
-  const wantId = path.basename(String(AUTH));
-  return m.qualifiedId === AUTH || m.qualifiedId === `${GLOBAL_WORKSPACE}/${wantId}` || m.id === wantId;
-}
-
-// Fork one process for module m and hand it the bundled code. Returns the handle; `wait(types)` resolves with the
-// next message of those types, or { type: 'exit' } if the process ends first.
-function forkBackend(m, code) {
-  const socketPath = path.join(SOCK_DIR, `${crypto.createHash('sha1').update(m.qualifiedId).digest('hex').slice(0, SOCKET_HASH_CHARS)}-${++sockGen}.sock`);
-  const child = fork(BACKEND_HOST, [], { stdio: ['ignore', 'inherit', 'inherit', 'ipc'] });
-  const b = { m, child, socketPath, alive: true, crashMessage: null, lastPong: Date.now(), stopping: false, loop: false, onExit: null, _wait: null };
-  b.wait = (types) => new Promise((res) => { b._wait = { types, res }; });
-  child.on('message', (msg) => {
-    if (!msg || typeof msg !== 'object') return;
-    if (msg.type === 'broadcast') { wsBroadcastFromModule(m.qualifiedId, msg.event || {}); return; }
-    if (msg.type === 'pong') { b.lastPong = Date.now(); return; }
-    if (msg.type === 'crash') { b.crashMessage = msg.message; return; }
-    if (b._wait && b._wait.types.includes(msg.type)) { const w = b._wait; b._wait = null; w.res(msg); }
-  });
-  child.on('error', () => {});
-  child.on('exit', (code, signal) => {
-    b.alive = false;
-    try { fs.unlinkSync(socketPath); } catch {}
-    if (b._wait) { const w = b._wait; b._wait = null; w.res({ type: 'exit', code, signal }); }
-    b.onExit?.(code, signal);
-  });
-  child.send({
-    type: 'load',
-    code,
-    info: {
-      id: m.id, workspace: m.workspace, qualifiedId: m.qualifiedId,
-      label: LABEL, port: PORT, host: HOST, baseUrl: BASE_URL,
-      dataDir: path.join(m.dir, 'data'), socketPath,
-    },
-  });
-  return b;
-}
-const exitWords = (b, r) => b.crashMessage || `the backend process ended (${r.signal || `exit ${r.code}`})`;
-
-// Bundle and load module m in a new process, not yet mounted. → { b } or { error }
-async function loadBackendProcess(m) {
-  let code;
-  try { code = await bundleBackend(m); } catch (err) { return { error: err?.message || String(err) }; }
-  const b = forkBackend(m, code);
-  const r = await b.wait(['loaded', 'load-error']);
-  if (r.type === 'loaded') return { b };
-  return { error: r.type === 'load-error' ? r.message : exitWords(b, r) };
-}
-// Mount a loaded process: mountRoutes runs, the socket listens. → null, or the error.
-async function mountBackendProcess(b) {
-  b.child.send({ type: 'mount' });
-  const r = await b.wait(['ready', 'load-error']);
-  if (r.type === 'ready') { b.lastPong = Date.now(); return null; }
-  return r.type === 'load-error' ? r.message : exitWords(b, r);
-}
-function killBackend(b, signal = 'SIGTERM') {
-  if (!b || !b.alive) return;
-  b.stopping = true;
-  try { b.child.kill(signal); } catch {}
-}
-// Ask a process to tear down and wait for it; SIGKILL after BACKEND_STOP_MS.
-function stopBackend(b) {
-  if (!b || !b.alive) return Promise.resolve();
-  b.stopping = true;
-  return new Promise((res) => {
-    const t = setTimeout(() => { try { b.child.kill('SIGKILL'); } catch {} }, BACKEND_STOP_MS);
-    b.child.once('exit', () => { clearTimeout(t); res(); });
-    try { b.child.send({ type: 'stop' }); } catch { try { b.child.kill('SIGTERM'); } catch {} }
-  });
-}
-
-function adoptBackend(m, b) {
-  let e = backendProcs.get(m.qualifiedId);
-  if (!e) { e = { m, b: null, backoff: 0, upSince: 0, restartTimer: null, gone: false }; backendProcs.set(m.qualifiedId, e); }
-  e.m = m;
-  e.b = b;
-  e.upSince = Date.now();
-  b.onExit = (code, signal) => onBackendExit(e, b, { code, signal });
-  return e;
-}
-
-function onBackendExit(e, b, r) {
-  if (b.stopping || e.b !== b || e.gone) return;   // stopped on purpose, or replaced
-  e.b = null;
-  const qid = e.m.qualifiedId;
-  const why = b.loop ? `stopped answering for ${Math.round(LOOP_MS / 1000)} s (a loop?) and was killed` : exitWords(b, r);
-  e.backoff = (Date.now() - e.upSince > BACKEND_STEADY_MS || !e.backoff) ? BACKEND_RESTART_FIRST_MS : Math.min(e.backoff * 2, BACKEND_RESTART_MAX_MS);
-  setBackendError(qid, b.loop ? `This module's backend ${why}.` : enrichBackendError(why, e.m.dir), 'crash');
-  console.error(`  ! ${qid}: backend process ended (${b.loop ? 'no answer, killed' : r.signal || `exit ${r.code}`}) · restarting in ${e.backoff / 1000} s · the rest keeps running`);
-  clearTimeout(e.restartTimer);
-  e.restartTimer = setTimeout(() => {
-    e.restartTimer = null;
-    if (e.gone || e.b) return;
-    startBackendProcess(e.m, 'restarted').catch((err) => console.error(`  ! restart ${qid}: ${err.message}`));
-  }, e.backoff);
-}
-
-async function startBackendProcess(m, verb = 'mounted') {
-  const qid = m.qualifiedId;
-  const fail = (raw, b) => {
-    killBackend(b, 'SIGKILL');
-    const message = enrichBackendError(raw, m.dir);
-    console.error(`  ! ${qid}: backend failed to load — ${message}`);
-    setBackendError(qid, message, 'load');
-    return false;
-  };
-  const r = await loadBackendProcess(m);
-  if (r.error) return fail(r.error);
-  const e = backendProcs.get(qid);
-  if (e?.gone) { killBackend(r.b, 'SIGKILL'); return false; }
-  const err = await mountBackendProcess(r.b);
-  if (err) return fail(err, r.b);
-  adoptBackend(m, r.b);
-  clearBackendError(qid);
-  console.log(`  + ${verb} ${qid} backend · pid ${r.b.child.pid}`);
-  return true;
-}
-
-async function reloadBackendProcess(m) {
-  const qid = m.qualifiedId;
-  const r = await loadBackendProcess(m);
-  if (r.error) {
-    const message = enrichBackendError(r.error, m.dir);
-    if (setBackendError(qid, message, 'load')) console.error(`  ! ${qid}: reload failed, keeping current version — ${message}`);
-    return;
-  }
-  const e = backendProcs.get(qid);
-  if (e) { clearTimeout(e.restartTimer); e.restartTimer = null; await stopBackend(e.b); e.b = null; }
-  const err = await mountBackendProcess(r.b);
-  if (err) {
-    killBackend(r.b, 'SIGKILL');
-    const message = enrichBackendError(err, m.dir);
-    console.error(`  ! ${qid}: reload failed — ${message}`);
-    setBackendError(qid, message, 'load');
-    return;
-  }
-  const ne = adoptBackend(m, r.b);
-  ne.backoff = 0;
-  clearBackendError(qid);
-  console.log(`  ↻ reloaded ${qid} backend · pid ${r.b.child.pid}`);
-}
-
-async function stopBackendProcess(qid) {
-  const e = backendProcs.get(qid);
-  if (!e) return;
-  e.gone = true;
-  clearTimeout(e.restartTimer);
-  backendProcs.delete(qid);
-  await stopBackend(e.b);
-}
-
-// The watchdog for loops: a process blocked in a loop cannot answer a ping.
-setInterval(() => {
-  const now = Date.now();
-  for (const e of backendProcs.values()) {
-    const b = e.b;
-    if (!b || !b.alive || b.stopping) continue;
-    if (now - b.lastPong > LOOP_MS) { b.loop = true; try { b.child.kill('SIGKILL'); } catch {} continue; }
-    try { b.child.send({ type: 'ping' }); } catch {}
-  }
-}, BACKEND_PING_MS).unref();
-
-// The module's lane, forwarded to its process. `shell` is what the shell decided about the request (the user the
-// gate resolved, the caller); it rides on a header only the shell sets, on a socket only the shell can open.
-async function proxyToBackend(req, res, e, shell) {
-  const qid = e.m.qualifiedId;
-  const b = e.b;
-  if (!b || !b.alive) {
-    res.writeHead(503, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'backend restarting', module: qid }));
-    return;
-  }
-  const headers = { ...req.headers };
-  delete headers[CALLER_HEADER];
-  headers[SHELL_HEADER] = Buffer.from(JSON.stringify(shell)).toString('base64');
-  // The gate's `authorize` may have read the body already (bodyOf memoizes it): send what it parsed.
-  let body = null;
-  if (req.__bodyPromise) {
-    try { body = Buffer.from(JSON.stringify(await req.__bodyPromise)); } catch { body = Buffer.from('{}'); }
-    headers['content-length'] = String(body.length);
-    delete headers['transfer-encoding'];
-  }
-  // A body the module stopped reading (a 413) is drained here, as the in-process router did, so the connection stays
-  // usable for the browser's next request.
-  const drain = () => { if (!req.complete) { req.unpipe(preq); req.resume(); } };
-  const preq = http.request({ socketPath: b.socketPath, method: req.method, path: req.url, headers }, (pres) => {
-    res.writeHead(pres.statusCode, pres.statusMessage, pres.headers);
-    pres.pipe(res);
-    pres.on('end', drain);
-  });
-  preq.on('error', () => {
-    drain();
-    if (!res.headersSent) {
-      res.writeHead(502, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'backend unreachable', module: qid }));
-    } else if (!res.writableFinished) res.destroy();
-  });
-  res.on('close', () => { if (!res.writableFinished) preq.destroy(); });
-  if (body) preq.end(body);
-  else req.pipe(preq);
-}
+const procs = createBackendProcs({
+  hostDir: HOST_DIR, auth: AUTH, label: LABEL, port: PORT, host: HOST, baseUrl: BASE_URL, bundle: bundleBackend,
+  broadcast: wsBroadcastFromModule, setError: setBackendError, clearError: clearBackendError, enrichError: enrichBackendError,
+});
 
 async function mountBackend(m) {
   watchBackend(m);  // always watch so a broken file can be fixed-and-reloaded
-  if (!isGateModule(m)) { await startBackendProcess(m); return; }
+  if (procs.runsApart(m)) { await procs.start(m); return; }
   let plug;
   try { plug = await importBackend(m); }
   catch (err) {
@@ -996,7 +771,7 @@ async function mountBackend(m) {
 }
 
 async function reloadBackend(m) {
-  if (!isGateModule(m)) { await reloadBackendProcess(m); return; }
+  if (procs.runsApart(m)) { await procs.reload(m); return; }
   let plug;
   try { plug = await importBackend(m); }
   catch (err) {
@@ -1023,7 +798,7 @@ async function reloadBackend(m) {
 // reality. Without that ping, the rail still shows the removed module
 // until the user manually reloads, and clicks land on a 404 SPA page.
 async function unmountBackend(id, reason = 'removed') {
-  await stopBackendProcess(id);
+  await procs.stop(id);
   const prev = mountedBackends.get(id);
   if (prev) {
     try { prev.teardown?.(); } catch (err) { console.warn(`  ! ${id}.teardown: ${err.message}`); }
@@ -1127,7 +902,7 @@ async function mountPendingBackends() {
   // catches in-session deletions instantly; this cleans up edge cases (e.g.
   // a module folder removed between server boot and first request, or
   // the watcher missing an event on some filesystems).
-  for (const id of [...mountedBackends.keys(), ...backendProcs.keys()]) {
+  for (const id of [...mountedBackends.keys(), ...procs.ids()]) {
     if (!liveIds.has(id)) await unmountBackend(id, 'not in discovery');
   }
   // Each backend starts its own process, so they start side by side. A request arriving while one is still starting
@@ -1170,13 +945,9 @@ await mountPendingBackends();
 function teardownAllBackends(reason) {
   if (teardownAllBackends.called) return;
   teardownAllBackends.called = true;
-  // Backend processes: SIGTERM, which their host turns into the module's teardown and an exit. (Should the shell
-  // die without this, each process sees its IPC channel close and tears down the same way.)
-  const procs = [...backendProcs.values()].filter((e) => e.b?.alive);
-  for (const e of backendProcs.values()) { e.gone = true; clearTimeout(e.restartTimer); killBackend(e.b, 'SIGTERM'); }
-  try { fs.rmSync(SOCK_DIR, { recursive: true, force: true }); } catch {}
-  if (mountedBackends.size === 0) { if (procs.length) console.log(`\n  ${reason}: stopping ${procs.length} backend process(es)`); return; }
-  console.log(`\n  ${reason}: tearing down ${mountedBackends.size + procs.length} backend(s)`);
+  const stopped = procs.stopAll();
+  if (mountedBackends.size === 0) { if (stopped) console.log(`\n  ${reason}: stopping ${stopped} backend process(es)`); return; }
+  console.log(`\n  ${reason}: tearing down ${mountedBackends.size + stopped} backend(s)`);
   for (const [id, { scope, teardown }] of mountedBackends) {
     try { teardown?.(); } catch (err) { console.warn(`  ! ${id}.teardown: ${err.message}`); }
     try { scope._dispose(); } catch {}
@@ -2374,8 +2145,8 @@ async function serveApiLane(req, res, url, apiUser, metaByQId) {
     return true;
   }
   // A backend process → forward, with what the shell decided: the user and the caller.
-  if (reqQid && backendProcs.has(reqQid)) {
-    await proxyToBackend(req, res, backendProcs.get(reqQid), { user: apiUser, caller: callerFor(req, apiUser) });
+  if (reqQid && procs.has(reqQid)) {
+    await procs.proxy(req, res, reqQid, { user: apiUser, caller: callerFor(req, apiUser) });
     return true;
   }
   return false;

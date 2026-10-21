@@ -1,4 +1,4 @@
-// The process one module's backend runs in. The shell forks one per module (server.js, "A process per backend"),
+// The process one module's backend runs in. The shell forks one per module (backend-procs.js, a process per backend),
 // hands it the module's bundled backend over IPC, and proxies `/api/<workspace>/<id>/…` to it over a private unix
 // socket. The module sees the module contract: `mountRoutes(router, ctx)`, scoped routes, `req.json()`, `res.json()`,
 // `req.user`, a teardown it may return, `ctx.broadcast` onto its own real-time topic, and `ctx.caller`.
