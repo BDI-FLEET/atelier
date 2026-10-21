@@ -41,8 +41,8 @@ function commit(at, files) {
 }
 const MODULE = { 'module.json': '{ "name": "Notes" }\n', 'frontend.jsx': 'export default function Notes() { return null }\n' }
 
-function cli(instance, args) {
-  const r = spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8', env: { ...process.env, ATELIER_ROOT: instance, GIT_TERMINAL_PROMPT: '0' } })
+function cli(instance, args, env = {}) {
+  const r = spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8', env: { ...process.env, ATELIER_ROOT: instance, GIT_TERMINAL_PROMPT: '0', ...env } })
   return { code: r.status, out: (r.stdout || '') + (r.stderr || '') }
 }
 
@@ -71,6 +71,25 @@ test('a repository without a module.json at its top is no module, so add leaves 
     assert.match(r.out, /is not a collection/)
     assert.ok(!fs.existsSync(path.join(instance, 'plain')))
     assert.ok(!fs.readdirSync(instance).some((f) => f.startsWith('.atelier-add-')), 'the trial clone is removed')
+  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
+})
+
+test('add clones a collection\'s repository once, the clone that looked for a module.json being kept as the subscription', () => {
+  const { dir, instance } = place()
+  try {
+    const src = repo(dir, 'shelf', { 'README.md': 'a collection\n' })
+    fs.mkdirSync(path.join(src, 'notes'))
+    commit(src, { 'notes/frontend.jsx': MODULE['frontend.jsx'] })
+    const trace = path.join(dir, 'git-trace')
+    const r = cli(instance, ['add', src], { GIT_TRACE: trace })
+    assert.equal(r.code, 0, r.out)
+    const clones = fs.readFileSync(trace, 'utf8').split('\n').filter((l) => /trace: built-in: git clone /.test(l))
+    assert.equal(clones.length, 1, clones.join('\n'))
+    const mirror = path.join(instance, '_collections', 'shelf')
+    assert.equal(git(mirror, 'remote', 'get-url', 'origin'), src)
+    assert.equal(head(mirror), head(src))
+    assert.ok(fs.existsSync(path.join(instance, 'notes', 'frontend.jsx')), 'the collection\'s module is installed')
+    assert.ok(!fs.readdirSync(instance).some((f) => f.startsWith('.atelier-add-')), 'the clone was moved, not left beside')
   } finally { fs.rmSync(dir, { recursive: true, force: true }) }
 })
 

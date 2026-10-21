@@ -10,7 +10,8 @@
  *
  * A repository with a module.json at its top is a module. Anything else given
  * to add (a collection: top-level folders that are modules) goes on to the
- * collection form in add.js; update with a collection's name, the same.
+ * collection form in add.js, which keeps the clone made here; update with a
+ * collection's name, the same.
  * Local edits in a module are never touched by update: a pull that is not a
  * fast-forward says so and changes nothing.
  */
@@ -26,12 +27,14 @@ const git = (args, cwd) => {
 };
 const NAME = /^[a-zA-Z0-9][\w.-]*$/;
 
-/* Clone `url` into the instance when it is a module's repository: { code } done (0 or 1), or null: not a module, the collection form goes on. */
+/* Clone `url` into the instance when it is a module's repository: { code } done (0 or 1). Otherwise what the collection
+ * form goes on with: { clone } the clone, at a folder of the instance it then owns, or { error } what git said when it
+ * could not clone. */
 export function addModule(root, url) {
   const tmp = path.join(root, `.atelier-add-${randomBytes(3).toString('hex')}`);
   const c = git(['clone', '-q', url, tmp], root);
-  if (c.code !== 0) { fs.rmSync(tmp, { recursive: true, force: true }); return null; }   // the collection form says why
-  if (!fs.existsSync(path.join(tmp, MODULE_JSON))) { fs.rmSync(tmp, { recursive: true, force: true }); return null; }
+  if (c.code !== 0) { fs.rmSync(tmp, { recursive: true, force: true }); return { error: c.err }; }
+  if (!fs.existsSync(path.join(tmp, MODULE_JSON))) return { clone: tmp };
   const name = path.basename(url.replace(/[/\\]+$/, '')).replace(/\.git$/, '').replace(/\.bundle$/, '');
   if (!NAME.test(name)) { fs.rmSync(tmp, { recursive: true, force: true }); console.error(`\natelier add: "${name}" is not a folder name for a module\n`); return { code: 2 }; }
   const dest = path.join(root, name);

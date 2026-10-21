@@ -98,11 +98,14 @@ const localNameFor = (source) =>
 
 /* ---- a module's repository (modules-git.js) ------------------------------------
  * A source whose top holds a module.json is cloned into the instance as it is;
- * anything else goes on to the collection form below.
+ * anything else goes on to the collection form below, with that clone (or what
+ * git said when it could not clone), so a source is cloned once.
  * ---------------------------------------------------------------------------- */
+let tried = null;
 if (isSource(spec) && !as && !workspace && !force) {
-  const r = addModule(ROOT, cloneUrlFor(spec));
-  if (r) process.exit(r.code);
+  tried = addModule(ROOT, cloneUrlFor(spec));
+  if ('code' in tried) process.exit(tried.code);
+  if (tried.clone) process.on('exit', () => fs.rmSync(tried.clone, { recursive: true, force: true }));
 }
 
 /* ---- subscribe (first contact) ---------------------------------------------- */
@@ -118,13 +121,16 @@ async function subscribe(source) {
   Subscribe under a new name: ${CLI_NAME} add ${source} --as <name>`);
   }
   fs.mkdirSync(collectionsRoot(ROOT), { recursive: true });
-  try {
-    // A full clone, deliberately not shallow: the mirror's history is the
-    // merge base a future update needs.
-    execFileSync('git', ['clone', '-q', url, dest],
-      { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
-  } catch (e) {
-    fail(`could not clone ${url}\n  ${gitErr(e)}`);
+  const cloneFailed = (e) => fail(`could not clone ${url}\n  ${gitErr(e)}`);
+  // A full clone, deliberately not shallow: the mirror's history is the
+  // merge base a future update needs. The one addModule made is such a clone.
+  if (tried?.error !== undefined) cloneFailed({ stderr: tried.error });
+  else if (tried?.clone) fs.renameSync(tried.clone, dest);
+  else {
+    try {
+      execFileSync('git', ['clone', '-q', url, dest],
+        { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
+    } catch (e) { cloneFailed(e); }
   }
   if (!listModuleDirs(dest).length) {
     fs.rmSync(dest, { recursive: true, force: true });
