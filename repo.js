@@ -38,15 +38,27 @@ export function git(cwd, args, env) {
   return { code: r.status ?? 1, out: (r.stdout || '').trim(), err: (r.stderr || '').trim() };
 }
 
+/* module.json's `name` in a folder: '' when it gives none, null when the folder holds no module.json that reads. */
+function declaredName(dir) {
+  let declared;
+  try { declared = JSON.parse(fs.readFileSync(path.join(dir, MODULE_JSON), 'utf8')); } catch { return null; }
+  return declared && typeof declared.name === 'string' ? declared.name : '';
+}
+
+/* The app a folder is, for create and for every verb that finds the module here: module.json's `name`, the folder's
+ * name when it gives none, and the host's label for it. */
+export function appOf(dir) {
+  const name = declaredName(dir) || path.basename(dir);
+  return { name, label: appLabel(name, path.basename(dir)) };
+}
+
 /* The module folder this command runs in: a git repository whose top holds a module.json. null outside of one. */
 export function moduleHere(cwd = process.cwd()) {
   const top = git(cwd, ['rev-parse', '--show-toplevel']);
   if (top.code !== 0 || !top.out) return null;
   const dir = top.out;
-  let declared;
-  try { declared = JSON.parse(fs.readFileSync(path.join(dir, MODULE_JSON), 'utf8')); } catch { return null; }
-  const name = declared && typeof declared.name === 'string' ? declared.name : '';
-  return { dir, name: appLabel(name, path.basename(dir)) };
+  if (declaredName(dir) === null) return null;
+  return { dir, name: appOf(dir).label };
 }
 
 /* A remote's URL: <host>/git/<computer>/<module>.git. */

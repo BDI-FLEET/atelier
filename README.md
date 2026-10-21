@@ -185,7 +185,7 @@ remote: -----> live: reading-list @ 9c04e1f
 in your sidebar on the portal
 ```
 
-`create [name]` makes the folder `name/` (or, without a name, takes this folder, named after it) with a module.json, the hello module, a `.gitignore` for `data/` and `node_modules/`, a repository and its first commit. Signed in, it sets the remote `atelier` to your own computer; not signed in, it says so and the folder is made all the same.
+`create [name]` makes the folder `name/` (or, without a name, takes this folder, the app named as its module.json names it, else after the folder, as `atelier remote` names it) with a module.json, the hello module, a `.gitignore` for `data/` and `node_modules/`, a repository and its first commit. Signed in, it sets the remote `atelier` to your own computer; not signed in, it says so and the folder is made all the same.
 
 `push [remote] [commit]` takes the remote as a plain argument, as git push does, and uses the remote named `atelier` when none is given; the commit is HEAD unless named. The host gives the CLI a token for this one push, this one module, five minutes; git pushes with it, and the host builds, backs up the data, runs the release script and switches before it accepts. Everything it prints reaches your terminal as it happens, each line marked `remote:`. A refused push never touched the running app. Going back is a push of an older commit: `atelier push atelier 81d07e4`.
 

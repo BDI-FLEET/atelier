@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-/* atelier create — makes a new project in your own space, named after the
- * folder unless you give a name, and sets this module's atelier remote to it.
+/* atelier create — makes a new project in your own space, named as the
+ * folder's module.json names it, else after the folder, unless you give a
+ * name, and sets this module's atelier remote to it.
  * If the folder is not a git repository yet, it becomes one, with data/ and
  * node_modules/ ignored. Nothing is pushed.
  *
@@ -10,7 +11,8 @@
  *
  * With a name: a new folder <name>/ holding the hello module (module.json,
  * frontend.jsx, backend.js), a .gitignore, a repository and its first commit
- * "atelier create <name>". Without one: this folder, named after it; what it
+ * "atelier create <name>". Without one: this folder, its app named as every
+ * verb that finds the module here names it (repo.js appOf); what it
  * lacks is added (module.json; the hello module only when it has neither a
  * frontend.jsx nor a backend.js; .gitignore) and committed, those files alone,
  * so a push carries them; a repository with history keeps it.
@@ -25,7 +27,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { readCredentials, resolveHost, askHost, sessionFor, unreachable, notSignedIn, COMPUTERS_PATH } from './session.js';
-import { DEFAULT_REMOTE, GITIGNORE, appLabel, git, remoteUrl, setRemote } from './repo.js';
+import { DEFAULT_REMOTE, GITIGNORE, appOf, git, remoteUrl, setRemote } from './repo.js';
 import { failer } from './ops.js';
 import { MODULE_JSON, BACKEND_FILE, FRONTEND_FILE } from './module-json.js';
 import { readArgs, helpOf, HOST } from './args.js';
@@ -42,8 +44,7 @@ const { opts, words: [given = null] } = readArgs(process.argv.slice(2), SPEC, fa
 if (given !== null && !/^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(given)) fail(`"${given}" isn't a folder name: letters, digits, - _ .\n\n${helpOf(SPEC)}`);
 
 const dir = given ? path.resolve(given) : process.cwd();
-const name = given || path.basename(dir);
-const label = appLabel(name);
+const { name, label } = appOf(dir);
 if (!label) fail(`"${name}" leaves no name for the app: give one, atelier create <name>`);
 if (given) {
   if (fs.existsSync(dir)) fail(`${given}/ exists already`);
@@ -59,7 +60,7 @@ if (!fs.existsSync(path.join(dir, FRONTEND_FILE)) && !fs.existsSync(path.join(di
   return <div className="p-8 text-xl">hello from ${name}</div>
 }
 `);
-  write(BACKEND_FILE, `// routes mount at /api/<workspace>/${label}
+  write(BACKEND_FILE, `// routes mount at /api/<workspace>/${path.basename(dir)}
 export default {
   mountRoutes(router, ctx) {
     router.get('/ping', (req, res) => res.json({ ok: true, from: ctx.qualifiedId }))

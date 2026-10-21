@@ -329,3 +329,21 @@ test('create makes a module repository with the remote atelier set to your own c
     assert.equal((await cli(h, h, ['create', 'reading-list'], host.url)).code, 2, 'the folder exists')
   } finally { await host.close() }
 })
+
+test('create in a folder whose module.json gives a name names the app as remote does, so both point at one app', async () => {
+  const host = await fakeHost()
+  try {
+    const h = home(host.url)
+    const dir = path.join(h, 'shelf')
+    fs.mkdirSync(dir)
+    fs.writeFileSync(path.join(dir, 'module.json'), '{ "name": "Reading List" }\n')
+    const r = await cli(h, dir, ['create'], host.url)
+    assert.equal(r.code, 0, r.out)
+    assert.equal(r.stdout, 'project Reading List · in your space · remote "atelier" set\n')
+    const url = `${host.url}/git/alex/reading-list.git`
+    assert.equal(g(dir, 'remote', 'get-url', 'atelier'), url)
+    const again = await cli(h, dir, ['remote', 'alex'], host.url)
+    assert.equal(again.code, 0, again.out)
+    assert.equal(g(dir, 'remote', 'get-url', 'atelier'), url)
+  } finally { await host.close() }
+})
