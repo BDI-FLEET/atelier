@@ -15,6 +15,9 @@ export const MODULE_ID = /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/;
 /** The header a host (or a computer) sets with who is calling, as it verified them. */
 export const CALLER_HEADER = 'x-atelier-caller';
 
+/** The header a computer sets on an agent's tool call with the call's id: the same id when it hands the call again. */
+export const CALL_HEADER = 'x-atelier-call';
+
 /** The header the shell sets on a request it forwards to a backend's process: what it decided about the request. */
 export const SHELL_HEADER = 'x-atelier-shell';
 

@@ -21,7 +21,7 @@ const SHAPES = [
 ]
 const PORT = ['a port in an address', /\/\/[\w.[\]:-]+:\d{2,5}\b/]
 
-const SHARED = ["'/api/computers'", "'x-atelier-caller'", "'x-atelier-shell'", "'module.json'", "'backend.js'", "'frontend.jsx'", "'data.tar'"]
+const SHARED = ["'/api/computers'", "'x-atelier-caller'", "'x-atelier-call'", "'x-atelier-shell'", "'module.json'", "'backend.js'", "'frontend.jsx'", "'data.tar'"]
 
 const withoutQuoted = (line) => line.replace(/'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"/g, "''")
 

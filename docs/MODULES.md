@@ -74,6 +74,7 @@ export default {
         input: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] },   // JSON Schema
         async run({ text }) {
           const who = ctx.caller            // { persona, name, sandbox, chat, word? }: the agent that called, and for whom, as the host verified it
+          const call = ctx.call             // the call's id: the same when the call is handed to the module again
           // … do it, under ctx.dataDir like any route …
           return 'noted'                    // any JSON value: what the agent gets back
         },
@@ -84,7 +85,7 @@ export default {
 }
 ```
 
-`run(args)` gets the arguments as one object and returns any JSON value. `ctx.caller` is the agent's caller: `{ persona, name, sandbox, chat, word? }` (a person's frame gives `{ person, name }`). `word` is `{ person, name }`, the person whose chat message the agent made the call for, when it named one: the host proved that message is theirs, in that chat, and recent. Absent, the agent named nobody. The app decides what that person may do: Notes files the note as theirs, filed by the agent. Throw an `Error` with a `statusCode` (`400`, `403`, `404`) to refuse a call with that sentence; anything else that throws is a `500` with its message. A name declared and not implemented, or implemented and not declared, is reported at start and not served. `tools(ctx)` is called once, when the module starts.
+`run(args)` gets the arguments as one object and returns any JSON value. `ctx.caller` is the agent's caller: `{ persona, name, sandbox, chat, word? }` (a person's frame gives `{ person, name }`). `word` is `{ person, name }`, the person whose chat message the agent made the call for, when it named one: the host proved that message is theirs, in that chat, and recent. Absent, the agent named nobody. The app decides what that person may do: Notes files the note as theirs, filed by the agent. `ctx.call` is the call's id (the `X-Atelier-Call` header the computer sets): a call whose answer was lost on its way back may be handed to the module again under the same id, so a tool that changes something can keep the ids it did and do each call's work once; Notes keeps the id on the note it files. Throw an `Error` with a `statusCode` (`400`, `403`, `404`) to refuse a call with that sentence; anything else that throws is a `500` with its message. A name declared and not implemented, or implemented and not declared, is reported at start and not served. `tools(ctx)` is called once, when the module starts.
 
 Where it runs: `module-serve.js` (the process a host's computer runs for one module) serves the declared tools on its socket, to its computer only:
 
@@ -125,7 +126,7 @@ export default {
 };
 ```
 
-`ctx` exposes exactly: `id`, `name`, `workspace`, `qualifiedId` (`'<workspace>/<id>'`), `label`, `port`, `host`, `baseUrl`, `dataDir`, `log`, `broadcast`, `module`, `caller` — and nothing else (no CORS or auth helpers; a module that needs CORS sets its own response headers). URLs you return in response bodies — for clients to follow — should be built off the module's mount point (`/api/${ctx.qualifiedId}/...`), never hardcoded. A module that opens its own listener (a sidecar) should bind `ctx.host` (also published as `process.env.HOST`) so it's never more exposed than the instance itself — that pattern, plus reader-relative links and frontends reaching sidecar ports, is in [Recipes](./RECIPES.md).
+`ctx` exposes exactly: `id`, `name`, `workspace`, `qualifiedId` (`'<workspace>/<id>'`), `label`, `port`, `host`, `baseUrl`, `dataDir`, `log`, `broadcast`, `module`, `caller`, `call` (a tool call's id on a host's computer, else `null`) — and nothing else (no CORS or auth helpers; a module that needs CORS sets its own response headers). URLs you return in response bodies — for clients to follow — should be built off the module's mount point (`/api/${ctx.qualifiedId}/...`), never hardcoded. A module that opens its own listener (a sidecar) should bind `ctx.host` (also published as `process.env.HOST`) so it's never more exposed than the instance itself — that pattern, plus reader-relative links and frontends reaching sidecar ports, is in [Recipes](./RECIPES.md).
 
 The router gives handlers `req.params`, `req.query`, `req.json()` (memoized, async; reads a body only when it says `content-type: application/json`, else rejects with a `415`; rejects with a `413` past a 10 MB body cap), `req.user` (see [AUTH.md](./AUTH.md)), and `res.json(data, status?)`.
 

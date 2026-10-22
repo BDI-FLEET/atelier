@@ -1,6 +1,7 @@
 // The router a module's backend is given is one (router.js), wherever the backend runs: in the shell's own process
 // (the gate's routes), in a backend's own process behind the shell (backend-host.js), and in a computer's serving
-// sandbox (module-serve.js). Its body reader is one too, so its rules hold in all three.
+// sandbox (module-serve.js). Its body reader is one too, so its rules hold in all three. In the serving sandbox a
+// request's caller and, on a tool call, the call's id are read off the computer's headers and taken off the request.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
@@ -10,6 +11,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { startServer } from './helpers.js'
+import { CALLER_HEADER, CALL_HEADER } from '../router.js'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const MODULE_SERVE = path.resolve(HERE, '..', 'module-serve.js')
@@ -38,8 +40,18 @@ async function moduleServe() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'atelier-router-'))
   const mod = path.join(dir, 'echo')
   fs.mkdirSync(mod)
-  fs.writeFileSync(path.join(mod, 'backend.js'),
-    "export default { mountRoutes(router) { router.post('/echo', async (q, s) => s.json({ echoed: await q.json() })) } }\n")
+  fs.writeFileSync(path.join(mod, 'module.json'), JSON.stringify({ name: 'echo', agent: { tools: ['heard'] } }))
+  // what a route and a tool read of the request: its body, ctx.caller, ctx.call and the computer's headers left on it
+  fs.writeFileSync(path.join(mod, 'backend.js'), `const left = (q) => Object.keys(q.headers).filter((h) => h.startsWith('x-atelier-'))
+export default {
+  mountRoutes(router, ctx) {
+    router.post('/echo', async (q, s) => s.json({ echoed: await q.json(), caller: ctx.caller, call: ctx.call, left: left(q) }))
+  },
+  tools(ctx) {
+    return { heard: { description: 'what the call carried', input: { type: 'object' }, async run() { return { caller: ctx.caller, call: ctx.call } } } }
+  },
+}
+`)
   const socket = path.join(dir, 'echo.sock')
   const p = spawn(process.execPath, [MODULE_SERVE, mod, '--socket', socket], { stdio: ['ignore', 'pipe', 'pipe'] })
   let out = ''
@@ -51,7 +63,7 @@ async function moduleServe() {
     p.on('exit', () => { clearTimeout(t); reject(new Error(`module-serve ended:\n${out}`)) })
   })
   return {
-    post: (headers, body) => viaSocket(socket, '/api/global/echo/echo', headers, body),
+    post: (headers, body, p = '/api/global/echo/echo') => viaSocket(socket, p, headers, body),
     stop: () => { p.removeAllListeners('exit'); p.kill('SIGTERM'); fs.rmSync(dir, { recursive: true, force: true }) },
   }
 }
@@ -79,5 +91,19 @@ test('req.json() reads a body only when it says content-type application/json, e
     sandbox.stop()
     await gated.stop()
     await shell.stop()
+  }
+})
+
+test("in a computer's serving sandbox a tool's run reads the call's id in ctx.call and a route reads null, both headers taken off the request", async () => {
+  const sandbox = await moduleServe()
+  try {
+    const caller = { persona: 'persona:b1', name: 'Bayard', sandbox: 'sandbox:5d', chat: 'chat:c2' }
+    const computer = { ...json, [CALLER_HEADER]: Buffer.from(JSON.stringify(caller)).toString('base64url'), [CALL_HEADER]: 'tc-0123abcd' }
+    const tool = await sandbox.post(computer, '{}', '/api/global/echo/tools/heard')
+    assert.deepEqual([tool.status, tool.body.result], [200, { caller, call: 'tc-0123abcd' }])
+    const route = await sandbox.post(computer, '{"a":1}')
+    assert.deepEqual([route.status, route.body.call, route.body.left], [200, null, []])
+  } finally {
+    sandbox.stop()
   }
 })

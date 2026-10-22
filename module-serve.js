@@ -18,6 +18,9 @@
 // { kind: 'chat', chat, name } (mounted to a chat they are in); for an agent's tool call: { persona, name, sandbox, chat }.
 // Only the computer reaches this socket (it lives in the computer's own folder for the sandbox), so the header is its
 // word; it is taken off before the module sees the request.
+// ctx.call: on an agent's tool call, the call's id from the X-Atelier-Call header, the same when the computer hands the
+// call again (its answer lost on the way back), so `run` can do a call's work once; null on any other request. Taken
+// off the request as the caller's header is.
 // req.json(): a body is read as JSON only when the request says it is JSON (content-type application/json); any other
 // body is refused 415. And a body of the three kinds any page may send another origin without asking first (text/plain, a
 // form, multipart) is refused 415 before any route runs: a write from another page never reaches a handler.
@@ -44,7 +47,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { pathToFileURL } from 'node:url';
 import { getJsx } from './build.js';
 import { readModuleJson, TOOL_NAME, BACKEND_FILE, FRONTEND_FILE } from './module-json.js';
-import { createRouter, readJsonBody, headerObject, CALLER_HEADER, MODULE_ID } from './router.js';
+import { createRouter, readJsonBody, headerObject, CALLER_HEADER, CALL_HEADER, MODULE_ID } from './router.js';
 import { MAX_HEADER_BYTES, STOP_FLUSH_MS, TEACHING_CHARS } from './limits.js';
 
 function args(argv) {
@@ -139,14 +142,16 @@ async function buildFrontend() {
 }
 
 // ---- the router: the one a local instance gives a module ----
-const callerStore = new AsyncLocalStorage();
+const requestStore = new AsyncLocalStorage();
 const prefix = `/api/${o.workspace}/${o.id}`;
 const router = createRouter();
 
-function callerOf(req) {
-  const raw = req.headers[CALLER_HEADER];
+/** Who calls and, on a tool call, the call's id: both headers taken off the request. */
+function askedOf(req) {
+  const raw = req.headers[CALLER_HEADER], call = req.headers[CALL_HEADER];
   delete req.headers[CALLER_HEADER];
-  return headerObject(raw);
+  delete req.headers[CALL_HEADER];
+  return { caller: headerObject(raw), call: typeof call === 'string' && call ? call : null };
 }
 
 const slots = new Map();
@@ -157,11 +162,12 @@ const ctx = {
   broadcast: (event) => console.log(`broadcast ${JSON.stringify(event || {})}`),
   module: (id) => { if (!slots.has(id)) slots.set(id, {}); return slots.get(id); },
 };
-Object.defineProperty(ctx, 'caller', { enumerable: true, get: () => callerStore.getStore()?.caller ?? null });
+Object.defineProperty(ctx, 'caller', { enumerable: true, get: () => requestStore.getStore()?.caller ?? null });
+Object.defineProperty(ctx, 'call', { enumerable: true, get: () => requestStore.getStore()?.call ?? null });
 
 const SIMPLE = /^(text\/plain|application\/x-www-form-urlencoded|multipart\/form-data)\b/i;
 async function handle(req, res) {
-  const caller = callerOf(req);
+  const asked = askedOf(req), { caller } = asked;
   if (req.method !== 'GET' && req.method !== 'HEAD' && SIMPLE.test(String(req.headers['content-type'] ?? ''))) {
     req.resume();
     res.writeHead(415, { 'Content-Type': 'application/json' });
@@ -180,11 +186,11 @@ async function handle(req, res) {
     return;
   }
   if (p === `${prefix}/tools` || p.startsWith(`${prefix}/tools/`)) {
-    if (await toolRequest(req, res, p, caller)) return;
+    if (await toolRequest(req, res, p, asked)) return;
   }
   req.user = null;
   req.caller = caller;
-  if (await router.handle(req, res, (fn) => callerStore.run({ caller }, fn))) return;
+  if (await router.handle(req, res, (fn) => requestStore.run({ caller, call: null }, fn))) return;
   res.writeHead(404, { 'Content-Type': 'text/plain' });
   res.end('Not found');
 }
@@ -215,7 +221,8 @@ function loadTools(plug) {
 }
 
 /** A request under /api/<ws>/<id>/tools: answered here (true), or not a tools path after all (false). */
-async function toolRequest(req, res, p, caller) {
+async function toolRequest(req, res, p, asked) {
+  const { caller } = asked;
   const send = (data, status = 200) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(data)); };
   if (p === `${prefix}/tools`) {
     if (req.method !== 'GET') return false;
@@ -230,7 +237,7 @@ async function toolRequest(req, res, p, caller) {
   let args;
   try { args = await readJsonBody(req); } catch (err) { send({ error: err.statusCode === 413 ? err.message : 'the arguments are not JSON' }, err.statusCode || 400); return true; }
   if (!args || typeof args !== 'object' || Array.isArray(args)) { send({ error: 'the arguments are one JSON object' }, 400); return true; }
-  await callerStore.run({ caller }, async () => {
+  await requestStore.run(asked, async () => {
     try { send({ result: (await t.run(args)) ?? null }); }
     catch (err) {
       const status = err.statusCode || 500;
