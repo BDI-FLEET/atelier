@@ -51,7 +51,6 @@ Supported keys:
 - `hidden` — boolean; keep the module out of the rail and `defaultUser` (chromes set this on themselves).
 - `isChrome` — boolean; marks a global-workspace module as a chrome (see [Special module: the chrome](#special-module-the-chrome)).
 - `chrome` — string; the **id of a chrome** this module should render inside, instead of the instance default (see [Per-module chrome](#per-module-chrome--metachrome)). Optional but **recommended for any module that imports `@atelier/kit`**; if the named chrome isn't installed the page shows a clear "chrome not installed" error **inside the default chrome** (no silent fallback — see [Per-module chrome](#per-module-chrome--metachrome)).
-- `sidebar` — boolean; tells the chrome *before the bundle loads* that this module exports its own `Sidebar` (see [Module sidebar](#module-sidebar--export-function-sidebar)), so the rail can mark it on first paint. Without it, the chrome learns it on the module's first visit.
 - `color` — reserved for future use.
 
 `meta` is optional; the rail falls back to `icon: 'square'` and `name: <dir>`. It's read server-side at discovery and shipped in the HTML bootstrap, so grouping renders on first paint with no flicker. Frontend bundles load **lazily** — a page load fetches the chrome plus the module being viewed, and other modules load on first visit. A module whose frontend must be live on *every* page (it exports a `TopBarCenter` topbar slot, or runs a global listener at import) declares `eager: true` in its meta; without the flag its slot never renders, because its bundle is simply never fetched. A **pure object literal is the fast path** — read straight from source, nothing executes. A *computed* meta (a template literal, a module-scope constant, a spread) also works: the shell evaluates the module in a **disposable sandbox process** — browser globals and every import stubbed with inert proxies, the process killed after the read — so top-level side effects never touch the server. If neither path can read it, discovery logs a warning naming the module and the reason, and the meta is ignored (never half-applied). Prefer the literal: it's instant, deterministic, and can't fail.
@@ -285,7 +284,7 @@ A module with its own navigation can export a `Sidebar` component next to its de
 ```jsx
 import { SidebarBody, SidebarSection, SidebarItem, SidebarLabel, Icon } from '@atelier/kit';
 
-export const meta = { name: 'Contacts', icon: 'users', sidebar: true };
+export const meta = { name: 'Contacts', icon: 'users' };
 
 const self = window.__atelier.self(import.meta.url);
 const SECTIONS = [['', 'Overview', 'layout-grid'], ['people', 'People', 'users'], ['map', 'Map', 'map']];
@@ -325,7 +324,7 @@ export default function Module() {
 - **Share state through the route.** `Sidebar` and the default export render in different parts of the page, so they don't share React context — `useRoute` (or `ctx.module`-backed data) is what keeps them in agreement, and it makes every sidebar entry deep-linkable.
 - **Build it from the chrome's kit** — the sidebar primitives and icons the chrome itself uses — so it reads as part of the shell. The primitives a chrome publishes are its own choice (see [Publishing primitives](#publishing-primitives--atelierkit)); a chrome that supports module sidebars documents which ones to use, and what it draws itself, in its own README.
 - **Places get an `href`, actions don't.** Build a navigational entry's `href` from `self(import.meta.url).qid` (never a literal path) and route the plain click through `navigate` — new-tab clicks work, and a chrome can tell places from actions.
-- **No `eager` needed.** The sidebar only shows while its module is active, and the active module's bundle is always loaded. Add `sidebar: true` to `meta` if you want the rail to mark the module before its first visit.
+- **No `eager`, no flag.** The sidebar only shows while its module is active, and the active module's bundle is always loaded. The shell reads the `Sidebar` export straight from `frontend.jsx` (a top-level `export function` / `const` / `export { … as Sidebar }`), so a chrome knows which modules have one before any bundle loads — the module entries carry `hasSidebar: true`.
 - **What the chrome does with it** — the header, the transition, keyboard navigation — is the chrome's call, like everything visual.
 
 ---
@@ -410,7 +409,7 @@ The shell calls `chrome(props)` with:
 |---|---|
 | `boot` | `{ mode, label, … }` — `mode` is `'host'` (a normal instance) or `'standalone'` (a single module via `dev:module`); `label` is the optional instance name from config, or `null`. Also carries `chromeQid` (the chrome resolved for this document), `defaultChromeQid`, `chromes` (the available chrome qids), and `backendErrors` (`[{ qid, message }]` for modules whose backend failed to mount) |
 | `user` | the post-auth user (`{ id, name, workspaces }`) |
-| `modules` | `[{ qid, id, workspace, hasFrontend, meta }]` — everything mounted |
+| `modules` | `[{ qid, id, workspace, hasFrontend, hasSidebar, meta }]` — everything mounted; `hasSidebar` is read from the frontend's source (it exports `Sidebar`) |
 | `workspaces` | `[{ id, name?, modules: [{ id, meta }] }]` |
 | `workspace` | the currently-routed workspace id |
 | `activeQid` | the active module's qualifiedId, or `null` |

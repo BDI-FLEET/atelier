@@ -2,3 +2,4 @@ export const meta = { name: 'Alpha', icon: 'square', group: 'demo' }
 export default function Module() {
   return <div className="p-8">alpha</div>
 }
+// export function Sidebar() {}  — commented out: must not count

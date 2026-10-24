@@ -42,6 +42,13 @@ test('a COMPUTED meta is evaluated in the sandbox — name resolves, chrome pin 
   assert.match(html, /"pinned-chrome"/)
 })
 
+test('a `Sidebar` export is detected from source — no flag for the author to keep', async () => {
+  const html = await (await fetch(server.base + '/')).text()
+  const entry = (id) => JSON.parse(html.match(new RegExp(`\\{"id":"${id}"[^{}]*\\{[^{}]*\\}[^{}]*\\}`))[0])
+  assert.equal(entry('beta').hasSidebar, true, 'export { Side as Sidebar }')
+  assert.equal(entry('alpha').hasSidebar, undefined, 'a commented-out export does not count')
+})
+
 test('no chrome installed → chromeQid is null (shell ships no default)', async () => {
   const html = await (await fetch(server.base + '/')).text()
   assert.match(html, /"chromeQid":null/)

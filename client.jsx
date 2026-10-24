@@ -363,6 +363,7 @@ function flattenUserModules(user) {
         qid: `${ws.id}/${m.id}`,
         workspace: ws.id,
         hasFrontend: m.hasFrontend !== false,
+        hasSidebar: m.hasSidebar === true,
         meta: m.meta || {},
       });
     }

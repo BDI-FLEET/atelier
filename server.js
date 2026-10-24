@@ -589,8 +589,7 @@ async function extractMetaSandboxed(src) {
   }
 }
 
-async function readMeta(src, label) {
-  const code = fs.readFileSync(src, 'utf8');
+async function readMeta(src, label, code = fs.readFileSync(src, 'utf8')) {
   // Static-first: read the literal `meta` from source without running the
   // module. This is the path for ~every module (their `meta` is a literal),
   // so a frontend's top-level code does NOT execute anywhere at discovery.
@@ -608,6 +607,20 @@ async function readMeta(src, label) {
   return sand.meta;
 }
 
+// Does the frontend export a `Sidebar`? Read from the same source as meta, so
+// the rail can mark the module on first paint without loading its bundle and
+// without the author keeping a flag in sync. Line-anchored, so a commented-out
+// export doesn't count; the loaded bundle stays the final word on the client.
+function exportsSidebar(code) {
+  if (/^export\s+(?:async\s+)?(?:function\b\s*\*?|const|let|var|class)\s*Sidebar\b/m.test(code)) return true;
+  for (const [, list] of code.matchAll(/^export\s*\{([^}]*)\}/gm)) {
+    for (const spec of list.split(',')) {
+      if (spec.trim().split(/\s+as\s+/).pop().trim() === 'Sidebar') return true;
+    }
+  }
+  return false;
+}
+
 async function getModuleMeta(m) {
   if (!m.hasFrontend) return {};
   const src = path.join(m.dir, 'frontend.jsx');
@@ -616,8 +629,9 @@ async function getModuleMeta(m) {
   const cached = metaCache.get(m.qualifiedId);
   if (cached && cached.mtimeMs === mtimeMs) return cached.meta;
   try {
-    const meta = await readMeta(src, m.qualifiedId);
-    metaCache.set(m.qualifiedId, { meta, mtimeMs });
+    const code = fs.readFileSync(src, 'utf8');
+    const meta = await readMeta(src, m.qualifiedId, code);
+    metaCache.set(m.qualifiedId, { meta, mtimeMs, hasSidebar: exportsSidebar(code) });
     return meta;
   } catch (err) {
     console.warn(`  ! meta read failed for ${m.qualifiedId}: ${err.message}`);
@@ -1450,6 +1464,7 @@ function buildDefaultUser({ metaByQId } = {}) {
     // them as infrastructure, not rail entries.
     if (meta.isChrome === true || meta.hidden === true) continue;
     const entry = { id: m.id, meta };
+    if (metaCache.get(m.qualifiedId)?.hasSidebar) entry.hasSidebar = true;
     if (!wsMap.has(m.workspace)) wsMap.set(m.workspace, []);
     wsMap.get(m.workspace).push(entry);
   }
