@@ -2,15 +2,15 @@
 
 Still pre-1.0 — anything in the shell surface (URLs, ctx shape, config schema) can move between minor versions until 1.0. The pace will slow as real users land, but for now: assume any 0.x bump may break a module that hardcoded an internal.
 
-## Unreleased
+## 0.22.0
 
-**Dependencies.** Tailwind 4.2.4 → 4.3.3 (`tailwindcss`, `@tailwindcss/node`, `@tailwindcss/oxide`; output is flattened rather than nested CSS, rendered styles unchanged). esbuild 0.28.0 → 0.28.2 (closes a low advisory in its Windows `serve` mode, unused here) and source-map-js 1.2.1 → 1.2.2 via the lockfile (a high-rated DoS on malicious source maps, reachable only through Tailwind reading the instance's own CSS). `npm audit` is clean.
+**Modules can bring their own sidebar.** A module may now export `Sidebar` next to its default export; the shell hands it to the chrome (`loadedModules[qid].Sidebar`), which can render it in place of its rail while the module is active — the chrome keeps its own header row, so there is always a way back. The shell reads the export from the module's source and ships `hasSidebar: true` on its module entry, so a chrome can mark the module on first paint — nothing for the author to declare. Additive: modules without the export, and chromes that ignore it, behave exactly as before. See [Module sidebar](./docs/MODULES.md#module-sidebar--export-function-sidebar).
 
 **Bundled chromes stopped raising false "missing key" warnings — and real ones surface.** The JSX runtime shim that bundled chromes compile through passed children inside `props` instead of as `createElement` arguments. React's key check keys off the latter, so (a) static children raised false warnings whenever a library re-passed them as an array (Headless UI does — every multi-child dropdown item, listbox option, field and dialog in a Headless-based chrome warned), and (b) genuinely unkeyed `list.map(…)` children in chrome code were never checked. The shim now hands children over the way React's own runtime does.
 
 **A shell change can no longer leave browsers on a stale bundle.** Built assets' ETags were keyed on the module's own sources only, so after a shell upgrade or a change to its build inputs, a restarted server shipped new bytes under the old ETag and browsers kept their cached copy (a `304`). Built assets now carry a fingerprint of the shell's build inputs (JSX shims, `build.js`, the installed esbuild / Tailwind / React) in their ETag: a shell change is one fresh download, then 304s as before.
 
-**Modules can bring their own sidebar.** A module may now export `Sidebar` next to its default export; the shell hands it to the chrome (`loadedModules[qid].Sidebar`), which can render it in place of its rail while the module is active — the chrome keeps its own header row, so there is always a way back. The shell reads the export from the module's source and ships `hasSidebar: true` on its module entry, so a chrome can mark the module on first paint — nothing for the author to declare. Additive: modules without the export, and chromes that ignore it, behave exactly as before. See [Module sidebar](./docs/MODULES.md#module-sidebar--export-function-sidebar).
+**Dependencies.** Tailwind 4.2.4 → 4.3.3 (`tailwindcss`, `@tailwindcss/node`, `@tailwindcss/oxide`; output is flattened rather than nested CSS, rendered styles unchanged). esbuild 0.28.0 → 0.28.2 (closes a low advisory in its Windows `serve` mode, unused here) and source-map-js 1.2.1 → 1.2.2 via the lockfile (a high-rated DoS on malicious source maps, reachable only through Tailwind reading the instance's own CSS). `npm audit` is clean.
 
 ## 0.21.0
 
