@@ -43,3 +43,18 @@ test("a frame host's channel carries its own module, a remote one only where the
   assert.equal(fenced.frameMod.qualifiedId, 'team/board')
   assert.equal(fenced.user, null)
 })
+
+test("a remote module listed in a company's workspace is framed on its origin as the app alone in the global workspace: its frame page at /global/<id>, its channel its global qid, the person's", async () => {
+  const alex = { id: 'alex', qids: ['halden/far'], workspaces: [{ id: 'halden', modules: [{ id: 'far', origin: 'http://far.localhost:4321', meta: { name: 'Far' } }] }] }
+  const f = frames({ remotes: true, bounded: () => true, getMetaByQId: async () => ({}), buildDefaultUser: () => null,
+    authenticateRequest: async () => alex, resolveChromeForQid: () => null })
+  const remote = await f.channel(req('far.localhost:4321'), async () => alex)
+  assert.deepEqual(remote, { user: alex, frameMod: { qualifiedId: 'global/far', workspace: 'global', id: 'far', remote: true, name: 'Far' } })
+  const page = async (p) => {
+    const res = { writeHead(status) { this.status = status }, end(body) { this.body = body } }
+    await f.serve({ ...req('far.localhost:4321'), method: 'GET' }, res, new URL(`http://far.localhost:4321${p}`))
+    return [res.status, /window\.__ATELIER_FRAME__ = (\{.*?\});/.exec(res.body)?.[1]]
+  }
+  assert.deepEqual(await page('/global/far/n/1'), [200, JSON.stringify({ qid: 'global/far', workspace: 'global', id: 'far', parent: null, title: 'Far', observe: false })])
+  assert.deepEqual(await page('/halden/far'), [404, undefined])
+})

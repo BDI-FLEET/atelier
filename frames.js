@@ -40,8 +40,9 @@ export function createFrames(shell) {
     return `${u.protocol}//${frameLabel(m)}.${domain}${u.port ? ':' + u.port : ''}`;
   }
   const isFrameHost = (req) => hostnameOf(req.headers.host).endsWith(FRAME_SUFFIX);
-  // The same boundary as the page's sidebar: a module that is not this person's is not there.
-  const notTheirs = (user, qid) => bounded() && !shell.userModuleSet(user).has(qid);
+  // The same boundary as the page's sidebar: a module that is not this person's is not there. A remote module is one
+  // the person's own sidebar names.
+  const notTheirs = (user, m) => !m.remote && bounded() && !shell.userModuleSet(user).has(m.qualifiedId);
 
   // The module a frame host names, from discovery. Two modules with one label (ids differing only in case): neither
   // is framed, rather than the wrong one.
@@ -56,6 +57,7 @@ export function createFrames(shell) {
   // here (the module runs elsewhere, on a computer the host reaches). On its origin the shell serves the frame's part,
   // the frame page, React, frame.js, the chrome's stylesheet and kit, and its real-time channel; the module's own paths
   // (`/api/<ws>/<id>/…`, `/modules/<ws>/<id>/…`) are the host's to answer before they reach the shell, and 404 here.
+  // Its origin is the app's alone, in the global workspace, whatever workspace of the person's lists it.
   function remoteFrameFor(req, user) {
     if (!remotes || !user) return null;
     const name = hostnameOf(req.headers.host);
@@ -63,7 +65,7 @@ export function createFrames(shell) {
       if (!m.origin) continue;
       let host;
       try { host = new URL(m.origin).hostname.toLowerCase(); } catch { continue; }
-      if (host === name) return { qualifiedId: `${ws.id}/${m.id}`, workspace: ws.id, id: m.id, remote: true, name: m.meta?.name || m.id };
+      if (host === name) return { qualifiedId: `${GLOBAL_WORKSPACE}/${m.id}`, workspace: GLOBAL_WORKSPACE, id: m.id, remote: true, name: m.meta?.name || m.id };
     }
     return null;
   }
@@ -130,7 +132,7 @@ ${hasKit ? `<script type="importmap">${JSON.stringify({ imports: { '@atelier/kit
     // a module that runs elsewhere, framed here because the host's sidebar names this origin for it
     if (!m) m = remoteFrameFor(req, user);
     if (!m) return notFound();
-    if (notTheirs(user, m.qualifiedId)) return notFound();
+    if (notTheirs(user, m)) return notFound();
     req.user = user;
     const own = `/${m.workspace}/${m.id}`;
     const p = url.pathname;
@@ -191,7 +193,7 @@ ${hasKit ? `<script type="importmap">${JSON.stringify({ imports: { '@atelier/kit
         frameMod = remoteFrameFor(req, user);
         if (!frameMod) return null;
       }
-      if (user && notTheirs(user, frameMod.qualifiedId)) user = null;
+      if (user && notTheirs(user, frameMod)) user = null;
       return { user, frameMod };
     },
   };
