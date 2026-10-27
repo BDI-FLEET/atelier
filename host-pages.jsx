@@ -1,8 +1,13 @@
 /* atelier · the host's pages in the page (hosted.js is the shell's side): pages are the host's own, apps are frames.
  *
+ * A page lives in a workspace: `/<ws>/<path>` is the host's page `<path>` in the workspace `<ws>` (Home, at '/', is
+ * `/<ws>/`), in each of the person's workspaces that lists it (a page's `workspaces`), a page listed nowhere in every one.
+ * A bare `/<path>` of a link made before is taken to the page in the global workspace; `/` lands as any address with no
+ * workspace does.
+ *
  * A page is the host's React component (its file's default export, JSX transformed per file like a module frontend,
  * React from this page, `@atelier/kit` from the chrome), rendered here, in the page, inside the chrome's content area.
- * Props: { user, path, navigate(path) }.
+ * Props: { user, path, workspace, navigate(path) }.
  */
 
 const { useState, useEffect } = React;
@@ -23,22 +28,43 @@ function listedIn(page, workspace) {
   const global = workspace === boot().globalWorkspace;
   return page.workspaces === boot().globalWorkspace ? global : !global;
 }
+/** A page lives in each workspace that lists it; one listed nowhere (`sidebar: false`) lives in every workspace. */
+const livesIn = (page, workspace) => page.sidebar === false || listedIn(page, workspace);
+/** A page's qid in a workspace, the address the chrome links it to without its leading slash: `<ws>/<path>`, Home's `<ws>/`. */
+export const pageQid = (workspace, path) => `${workspace}/${path.slice(1)}`;
 /**
  * The host's pages as sidebar entries, Home first: each page the host did not mark `sidebar: false` and that is listed
- * in `workspace`, in the host's order, as a rail item of that workspace, its qid its path without the leading slash (the chrome links an
- * item to `/<qid>`: Home's is ''), `meta.primary` so a chrome that puts primary items first puts them before the apps,
- * `page` its path. Never a module, never a frame: navigate() takes a page's qid to its path.
+ * in `workspace`, in the host's order, as a rail item of that workspace, its qid pageQid's (the chrome links an item to
+ * `/<qid>`), `meta.primary` so a chrome that puts primary items first puts them before the apps, `page` its path. Never a
+ * module, never a frame.
  */
 export function pageEntries(workspace) {
   return hostPages().filter((p) => p.sidebar !== false && listedIn(p, workspace)).map((p, i) => ({
-    id: `page:${p.path}`, qid: p.path.slice(1), workspace: workspace || '', hasFrontend: true, origin: null, page: p.path,
+    id: `page:${p.path}`, qid: pageQid(workspace, p.path), workspace, hasFrontend: true, origin: null, page: p.path,
     meta: { name: p.title, icon: p.icon || 'file', primary: true, order: i },
   }));
 }
-/** The host page for a path, from the bootstrap: an exact match ('/x/' is '/x'). */
+/**
+ * The page an address names and the workspace it is in, from the bootstrap: `/<ws>/<path>` ('/x/' is '/x'; `/<ws>/` is
+ * the page at '/'), `ws` one of the person's workspaces and the page living there → { page, workspace }; null for
+ * anything else, and for an address a module of that workspace holds (the first segment of the path its id).
+ */
 export function hostPageFor(pathname) {
-  const p = pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname;
-  return (window.__ATELIER__?.pages || []).find((x) => x.path === p) || null;
+  const m = /^\/([^/]+)(\/.*)?$/.exec(pathname);
+  if (!m) return null;
+  let workspace;
+  try { workspace = decodeURIComponent(m[1]); } catch { return null; }
+  const ws = (boot().user?.workspaces || []).find((w) => w.id === workspace);
+  if (!ws) return null;
+  const path = (m[2] || '').replace(/\/+$/, '') || '/';
+  if ((ws.modules || []).some((x) => x.id === path.split('/')[1])) return null;
+  const page = hostPages().find((p) => p.path === path && livesIn(p, workspace));
+  return page ? { page, workspace } : null;
+}
+/** A bare page path, as links made before pages lived in a workspace write it ('/companies'): its address in the global workspace; null for '/' and anything else. */
+export function barePageAddress(pathname) {
+  const path = pathname.replace(/\/+$/, '');
+  return path && hostPages().some((p) => p.path === path) ? `/${encodeURIComponent(boot().globalWorkspace)}${path}` : null;
 }
 export function HostPage({ page, props }) {
   const [state, setState] = useState({ kind: 'loading' });

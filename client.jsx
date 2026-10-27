@@ -25,7 +25,7 @@
 import { resolveModuleChrome, missingChrome } from './chrome-resolve.js';
 import { wireWsBridge } from './ws-bridge.js';
 import { ModuleFrame } from './module-frame.js';
-import { pageEntries, hostPageFor, HostPage, SignedOut } from './host-pages.js';
+import { pageEntries, pageQid, hostPageFor, barePageAddress, HostPage, SignedOut } from './host-pages.js';
 
 const { useState, useEffect, useRef } = React;
 
@@ -46,6 +46,9 @@ if (!window.__ATELIER__?.signedOut) wireWsBridge({ watch: true });
  *   /<ws>/<id>/<rest…> module sub-route — the shell owns ws+id; `rest` is the
  *                       active module's own space, surfaced via
  *                       window.__atelier.useRoute() (below).
+ *   /<ws>/<path>       a host's page in that workspace (host-pages.jsx); a
+ *                       bare /<path> of an old link is replaced by the page
+ *                       in the global workspace, its query and fragment kept.
  * ========================================================================= */
 function parseUrl() {
   const p = window.location.pathname;
@@ -58,6 +61,11 @@ function parseUrl() {
     id: m[2] ? decodeURIComponent(m[2]) : null,
     rest: m[3] ? decodeURIComponent(m[3].replace(/\/+$/, '')) : '',
   };
+}
+
+function takeBarePage() {
+  const to = barePageAddress(window.location.pathname);
+  if (to) window.history.replaceState(null, '', to + window.location.search + window.location.hash);
 }
 
 function buildUrl(ws, id, rest) {
@@ -389,7 +397,7 @@ function App() {
   const defaultChromeQid = boot.defaultChromeQid || boot.chromeQid || null;
   const availableChromes = boot.chromes || [];
 
-  const [urlState, setUrlState] = useState(parseUrl);
+  const [urlState, setUrlState] = useState(() => { takeBarePage(); return parseUrl(); });
   const [chromeEntry, setChromeEntry] = useState(null); // load entry for chrome
   const [backendErrors, setBackendErrors] = useState(() => boot.backendErrors || []);
 
@@ -403,7 +411,7 @@ function App() {
 
   // Canonicalize URL: with no workspace in the path (`/`), land on the default
   // workspace — its `meta.primary` module if any, else its home.
-  // A host page at this path: the host's own, shown in the content area; the URL stays as it is.
+  // A host page at this address, { page, workspace }: the host's own, shown in the content area; the URL stays as it is.
   const hostPage = hostPageFor(window.location.pathname);
   useEffect(() => {
     if (hostPage || urlState.ws || !defaultWs) return;
@@ -421,7 +429,7 @@ function App() {
     window.history.replaceState(null, '', target);
     setUrlState(parseUrl());
   }, [urlState.ws]);
-  const effectiveWorkspace = hostPage ? defaultWs : (urlState.ws || defaultWs);
+  const effectiveWorkspace = urlState.ws || defaultWs;
 
   // Load the chrome bundle.
   useEffect(() => {
@@ -442,7 +450,7 @@ function App() {
   // so activeMod stays the same and the module re-renders without remounting
   // (stable element identity → its WS subscriptions persist).
   useEffect(() => {
-    const onPop = () => setUrlState(parseUrl());
+    const onPop = () => { takeBarePage(); setUrlState(parseUrl()); };
     window.addEventListener('popstate', onPop);
     window.addEventListener('atelier:route', onPop);
     return () => {
@@ -559,13 +567,13 @@ function App() {
       window.history.pushState(null, '', target);
       window.dispatchEvent(new CustomEvent('atelier:navigate', { detail: { url: target } }));
     }
+    takeBarePage();
     setUrlState(parseUrl());
   }
 
   function navigateByQid(qid) {
-    // a host page's entry: its path
-    const page = (window.__ATELIER__?.pages || []).find((p) => p.path.slice(1) === qid);
-    if (page) { navigateTo(page.path); return; }
+    // a host page's entry: its address
+    if (wsList.some((w) => pageEntries(w.id).some((e) => e.qid === qid))) { navigateTo(`/${qid}`); return; }
     const [ws, id] = qid.split('/');
     if (!ws) return;
     // Workspace follows the URL: navigating to any module — global or not —
@@ -614,8 +622,9 @@ function App() {
     active = {
       kind: 'ready',
       qid: null,
-      title: hostPage.title,
-      element: React.createElement(HostPage, { key: hostPage.path, page: hostPage, props: { user, path: hostPage.path, navigate: navigateTo } }),
+      title: hostPage.page.title,
+      element: React.createElement(HostPage, { key: pageQid(hostPage.workspace, hostPage.page.path), page: hostPage.page,
+        props: { user, path: hostPage.page.path, workspace: hostPage.workspace, navigate: navigateTo } }),
     };
   } else if (!activeMod) {
     active = { kind: 'none' };
@@ -658,7 +667,7 @@ function App() {
         modules: [...pageEntries(effectiveWorkspace), ...allModules],
         workspaces: wsList,
         workspace: effectiveWorkspace || '',
-        activeQid: hostPage && !activeMod ? hostPage.path.slice(1) : activeQid,
+        activeQid: hostPage && !activeMod ? pageQid(hostPage.workspace, hostPage.page.path) : activeQid,
         active,
         loadedModules: NO_MODULE_BUNDLES,
         navigate: navigateByQid,
