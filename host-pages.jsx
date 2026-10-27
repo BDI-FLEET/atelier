@@ -15,14 +15,22 @@ function loadHostPage(src) {
   }));
   return hostPageCache.get(src);
 }
+const boot = () => window.__ATELIER__ || {};
+const hostPages = () => boot().pages || [];
+/** Whether a page is listed in a workspace: the one its `workspaces` names (the global workspace, or every other one), else every one. */
+function listedIn(page, workspace) {
+  if (!page.workspaces) return true;
+  const global = workspace === boot().globalWorkspace;
+  return page.workspaces === boot().globalWorkspace ? global : !global;
+}
 /**
- * The host's pages as sidebar entries, Home first: each page the host did not mark `sidebar: false`, in the host's
- * order, as a rail item of the workspace on screen, its qid its path without the leading slash (the chrome links an
+ * The host's pages as sidebar entries, Home first: each page the host did not mark `sidebar: false` and that is listed
+ * in `workspace`, in the host's order, as a rail item of that workspace, its qid its path without the leading slash (the chrome links an
  * item to `/<qid>`: Home's is ''), `meta.primary` so a chrome that puts primary items first puts them before the apps,
  * `page` its path. Never a module, never a frame: navigate() takes a page's qid to its path.
  */
 export function pageEntries(workspace) {
-  return (window.__ATELIER__?.pages || []).filter((p) => p.sidebar !== false).map((p, i) => ({
+  return hostPages().filter((p) => p.sidebar !== false && listedIn(p, workspace)).map((p, i) => ({
     id: `page:${p.path}`, qid: p.path.slice(1), workspace: workspace || '', hasFrontend: true, origin: null, page: p.path,
     meta: { name: p.title, icon: p.icon || 'file', primary: true, order: i },
   }));

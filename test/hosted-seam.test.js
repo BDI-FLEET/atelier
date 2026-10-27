@@ -38,6 +38,22 @@ test("a sidebar entry that names a workspace and no id declares the workspace: l
   ])
 })
 
+test("a page says which workspaces list it, the global one or the others, none for every one; the bootstrap carries it and any other word stops the load", async () => {
+  put('w/home.jsx', 'export default () => null\n')
+  put('w/plans.jsx', 'export default () => null\n')
+  put('w/agents.jsx', 'export default () => null\n')
+  const file = put('listed.js', `export const pages = { '/': { title: 'Home', file: './w/home.jsx' }, '/agents': { title: 'Agents', file: './w/agents.jsx', workspaces: 'global' },
+    '/plans': { title: 'Plans', file: './w/plans.jsx', workspaces: 'others' } }\n`)
+  const host = await quiet(() => loadHost(file, DIR, {}))
+  assert.deepEqual(host.bootstrap(), { globalWorkspace: 'global', pages: [
+    { path: '/', title: 'Home', src: '/_atelier/pages/home.js' },
+    { path: '/agents', title: 'Agents', src: '/_atelier/pages/agents.js', workspaces: 'global' },
+    { path: '/plans', title: 'Plans', src: '/_atelier/pages/plans.js', workspaces: 'others' },
+  ] })
+  const wrong = put('wrong.js', `export const pages = { '/plans': { title: 'Plans', file: './w/plans.jsx', workspaces: 'halden' } }\n`)
+  await assert.rejects(loadHost(wrong, DIR, {}), /pages: "\/plans": workspaces is 'global' or 'others'/)
+})
+
 test("the host's person() replaces the auth slot, and the caller is the host's header when it sends one, else the person", async () => {
   const file = put('person.js', `export function person(req) { return req.headers.cookie === 'alex' ? { person: 'alex', name: 'Alex' } : null }\n`)
   const host = await quiet(() => loadHost(file, DIR, {}))
