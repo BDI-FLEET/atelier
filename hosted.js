@@ -3,6 +3,10 @@
  * (`person(req)`), the sidebar (`sidebar(req, person)`) and the host's own pages (`pages`). Without it: a plain
  * instance, and the caller header is ignored.
  *
+ * The sidebar is a list of entries, each a module listed in the workspace it names (the global one when it names none):
+ * `{ id, name?, icon?, group?, origin?, workspace? }`. An entry that names a `workspace` and no `id` declares that
+ * workspace (`{ workspace, name? }`): the person's workspaces list it, with no modules, and its name when it gives one.
+ *
  * The file is loaded once at boot. A host that names a file the shell cannot load stops the start: falling back to
  * "no host" would silently drop who the person is and where the sidebar comes from.
  *
@@ -75,15 +79,23 @@ function createHost({ person, sidebar, pages }, shell) {
   const signsIn = Boolean(person && pages?.signIn);
 
   // The host's sidebar list → the `user.workspaces` shape the chrome already draws. Each entry: { id, name?, icon?,
-  // group?, origin?, workspace? }; `origin` is where the module's frame lives (under the host, not on this machine).
+  // group?, origin?, workspace? }, or { workspace, name? } declaring a workspace; `origin` is where the module's frame
+  // lives (under the host, not on this machine).
   async function sidebarWorkspaces(req, who) {
     let list = [];
     try { list = await sidebar(req, who); }
     catch (err) { console.error(`  ! hosted sidebar() threw: ${err.message}`); }
-    const byWs = new Map([[GLOBAL_WORKSPACE, []]]);
+    const byWs = new Map([[GLOBAL_WORKSPACE, []]]), names = new Map();
     for (const e of Array.isArray(list) ? list : []) {
-      if (!e || typeof e.id !== 'string' || !MODULE_ID.test(e.id)) continue;
-      const ws = typeof e.workspace === 'string' && MODULE_ID.test(e.workspace) ? e.workspace : GLOBAL_WORKSPACE;
+      if (!e) continue;
+      const named = typeof e.workspace === 'string' && MODULE_ID.test(e.workspace) ? e.workspace : null;
+      if (e.id === undefined && named) {
+        if (!byWs.has(named)) byWs.set(named, []);
+        if (typeof e.name === 'string') names.set(named, e.name);
+        continue;
+      }
+      if (typeof e.id !== 'string' || !MODULE_ID.test(e.id)) continue;
+      const ws = named || GLOBAL_WORKSPACE;
       const meta = {};
       for (const k of ['name', 'icon', 'group']) if (typeof e[k] === 'string') meta[k] = e[k];
       const entry = { id: e.id, meta };
@@ -93,7 +105,7 @@ function createHost({ person, sidebar, pages }, shell) {
     }
     return [...byWs.entries()]
       .sort(([a], [b]) => (a === GLOBAL_WORKSPACE ? -1 : b === GLOBAL_WORKSPACE ? 1 : a.localeCompare(b)))
-      .map(([id, modules]) => ({ id, modules }));
+      .map(([id, modules]) => ({ id, ...(names.has(id) ? { name: names.get(id) } : {}), modules }));
   }
 
   // The host's sign-in page for nobody: the chrome's stylesheet and kit (for its AuthLayout), the page, and nothing

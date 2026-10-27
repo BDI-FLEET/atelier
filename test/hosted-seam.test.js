@@ -24,6 +24,20 @@ test("the host's sidebar() replaces the discovered modules: the entries it names
   ])
 })
 
+test("a sidebar entry that names a workspace and no id declares the workspace: listed with no modules, with its name when it gives one", async () => {
+  const file = put('declared.js', `export function sidebar() { return [
+    { workspace: 'halden', name: 'Halden' }, { id: 'notes' }, { workspace: 'team' }, { workspace: '../up', name: 'Up' }, { name: 'Nowhere' },
+    { id: 'board', workspace: 'team' },
+  ] }\n`)
+  const host = await quiet(() => loadHost(file, DIR, {}))
+  const user = await host.gate({ headers: {} }, { id: 'local', workspaces: [] }, async (req, d) => d)
+  assert.deepEqual(user.workspaces, [
+    { id: 'global', modules: [{ id: 'notes', meta: {} }] },
+    { id: 'halden', name: 'Halden', modules: [] },
+    { id: 'team', modules: [{ id: 'board', meta: {} }] },
+  ])
+})
+
 test("the host's person() replaces the auth slot, and the caller is the host's header when it sends one, else the person", async () => {
   const file = put('person.js', `export function person(req) { return req.headers.cookie === 'alex' ? { person: 'alex', name: 'Alex' } : null }\n`)
   const host = await quiet(() => loadHost(file, DIR, {}))
