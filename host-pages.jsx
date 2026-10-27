@@ -44,6 +44,10 @@ export function pageEntries(workspace) {
     meta: { name: p.title, icon: p.icon || 'file', primary: true, order: i },
   }));
 }
+/** Every workspace's page entries, workspace by workspace: what the chrome is handed among `modules` (⌘K finds a page of another workspace). */
+export const pageEntriesOf = (workspaces) => workspaces.flatMap((w) => pageEntries(w.id));
+/** The workspaces as the chrome is handed them: each with its page entries before its modules, so a workspace with pages and no module is in the picker. */
+export const withPages = (workspaces) => workspaces.map((w) => ({ ...w, modules: [...pageEntries(w.id), ...(w.modules || [])] }));
 /**
  * The page an address names and the workspace it is in, from the bootstrap: `/<ws>/<path>` ('/x/' is '/x'; `/<ws>/` is
  * the page at '/'), `ws` one of the person's workspaces and the page living there → { page, workspace }; null for

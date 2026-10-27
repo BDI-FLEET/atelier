@@ -49,3 +49,11 @@ test("a page's entry in a workspace is its rail item there: its qid the workspac
   assert.deepEqual(pages.pageEntries('halden').map((e) => [e.qid, e.workspace, e.page]), [['halden/', 'halden', '/'], ['halden/companies', 'halden', '/companies'], ['halden/plans', 'halden', '/plans']])
   assert.equal(pages.pageQid('global', '/'), 'global/')
 })
+
+test("the chrome is handed every workspace with its pages among its modules, so one with pages and no module is in the picker, and every workspace's pages for ⌘K", () => {
+  const shown = pages.withPages(WORKSPACES)
+  assert.deepEqual(shown.map((w) => [w.id, w.name, w.modules.map((m) => m.qid ?? m.id)]),
+    [['global', undefined, ['global/', 'global/companies', 'global/agents', 'notes']], ['halden', 'Halden', ['halden/', 'halden/companies', 'halden/plans']]])
+  assert.deepEqual(WORKSPACES[1].modules, [], "the person's workspaces stay as the server gave them")
+  assert.deepEqual(pages.pageEntriesOf(WORKSPACES).map((e) => e.qid), ['global/', 'global/companies', 'global/agents', 'halden/', 'halden/companies', 'halden/plans'])
+})

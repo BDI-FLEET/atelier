@@ -25,7 +25,7 @@
 import { resolveModuleChrome, missingChrome } from './chrome-resolve.js';
 import { wireWsBridge } from './ws-bridge.js';
 import { ModuleFrame } from './module-frame.js';
-import { pageEntries, pageQid, hostPageFor, barePageAddress, HostPage, SignedOut } from './host-pages.js';
+import { pageEntriesOf, withPages, pageQid, hostPageFor, barePageAddress, HostPage, SignedOut } from './host-pages.js';
 
 const { useState, useEffect, useRef } = React;
 
@@ -387,6 +387,9 @@ function App() {
   const user = boot.user || { id: 'local', workspaces: [] };
   const allModules = flattenUserModules(user);
   const wsList = user.workspaces || [];
+  // the workspaces as the chrome lists them, each with the host's pages listed there among its modules
+  const shownWorkspaces = withPages(wsList);
+  const pageList = pageEntriesOf(wsList);
   const chromeQid = boot.chromeQid || null;
   // Multi-chrome: a module may pin its chrome via `meta.chrome`; the shell
   // resolves it server-side (this document already booted in `chromeQid`). The
@@ -405,9 +408,10 @@ function App() {
   // sticky state and no sessionStorage. Navigating anywhere (rail click, picker,
   // or a pasted URL) switches workspace because it switches the URL. `global` is
   // a normal workspace here, not a shared baseline. `defaultWs` is only used to
-  // decide where a bare `/` lands: the first workspace with modules — and since
-  // the server orders `global` first, that's `global` whenever it has any.
-  const defaultWs = (wsList.find((w) => (w.modules || []).length > 0) || wsList[0])?.id || null;
+  // decide where a bare `/` lands: the first workspace with modules or the host's
+  // pages — and since the server orders `global` first, that's `global` whenever
+  // it has any.
+  const defaultWs = (shownWorkspaces.find((w) => w.modules.length > 0) || wsList[0])?.id || null;
 
   // Canonicalize URL: with no workspace in the path (`/`), land on the default
   // workspace — its `meta.primary` module if any, else its home.
@@ -573,7 +577,7 @@ function App() {
 
   function navigateByQid(qid) {
     // a host page's entry: its address
-    if (wsList.some((w) => pageEntries(w.id).some((e) => e.qid === qid))) { navigateTo(`/${qid}`); return; }
+    if (pageList.some((e) => e.qid === qid)) { navigateTo(`/${qid}`); return; }
     const [ws, id] = qid.split('/');
     if (!ws) return;
     // Workspace follows the URL: navigating to any module — global or not —
@@ -664,8 +668,8 @@ function App() {
       React.createElement(Chrome, {
         boot,
         user,
-        modules: [...pageEntries(effectiveWorkspace), ...allModules],
-        workspaces: wsList,
+        modules: [...pageList, ...allModules],
+        workspaces: shownWorkspaces,
         workspace: effectiveWorkspace || '',
         activeQid: hostPage && !activeMod ? pageQid(hostPage.workspace, hostPage.page.path) : activeQid,
         active,
