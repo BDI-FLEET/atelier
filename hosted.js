@@ -12,7 +12,8 @@
  *
  * The host's own pages (pages are the host's, apps are frames): `pages` maps a path to { title, file, icon?, sidebar?,
  * workspaces? } (each listed in the sidebar as an entry, in the order given, before the modules, unless sidebar: false;
- * in every workspace, or only in the global one with workspaces: 'global', or only in the others with 'others'), and the one
+ * in every workspace, or only in the global one with workspaces: 'global', or only in the others with 'others'; a page
+ * lives at /<ws>/<path> in each of those workspaces, listed or not, and host-pages.jsx resolves the address), and the one
  * key `signIn` names the page shown, at whatever path was asked, when person() says nobody. A page is a React component
  * (the file's default export), written like a module frontend: JSX transformed per file, React from the page,
  * `@atelier/kit` from the chrome. It runs in the page itself, inside the chrome's content area, never in a frame. The
