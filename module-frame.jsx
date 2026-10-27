@@ -18,17 +18,18 @@ const FRAME_MIN_HEIGHT = 240;
 
 const themeNow = () => (document.documentElement.classList.contains('dark') ? 'dark' : 'light');
 
-export function ModuleFrame({ qid, origin, route, title, onTitle, buildUrl }) {
+export function ModuleFrame({ qid, frameQid, origin, route, title, onTitle, buildUrl }) {
   const ref = useRef(null);
   const [height, setHeight] = useState(null);
   const [theme, setTheme] = useState(themeNow);
   const [ws, id] = qid.split('/');
-  // The first address only; later routes travel by the bridge (a new src would reload the module).
+  // The first address only, the frame's own on its origin; later routes travel by the bridge (a new src would reload the module).
   const src = React.useMemo(() => {
-    const u = new URL(buildUrl(ws, id, route), origin);
+    const [frameWs, frameId] = frameQid.split('/');
+    const u = new URL(buildUrl(frameWs, frameId, route), origin);
     u.searchParams.set('atelier-parent', window.location.origin);
     return u.href;
-  }, [qid, origin]);
+  }, [frameQid, origin]);
   const routeRef = useRef(route);
   routeRef.current = route;
   const post = (type, data) => {

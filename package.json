@@ -59,6 +59,7 @@
     "chrome-resolve.js",
     "client.jsx",
     "module-frame.jsx",
+    "user-modules.js",
     "host-pages.jsx",
     "index.html",
     "shims",

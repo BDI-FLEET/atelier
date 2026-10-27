@@ -4,8 +4,11 @@
  * instance, and the caller header is ignored.
  *
  * The sidebar is a list of entries, each a module listed in the workspace it names (the global one when it names none):
- * `{ id, name?, icon?, group?, origin?, workspace? }`. An entry that names a `workspace` and no `id` declares that
- * workspace (`{ workspace, name? }`): the person's workspaces list it, with no modules, and its name when it gives one.
+ * `{ id, name?, icon?, group?, origin?, workspace? }`. An entry with an `origin` may be listed in any workspace, and in
+ * several, an entry in each: its frame lives at its origin's global address, `<origin>/<global>/<id>`, as the app alone
+ * in the global workspace there, while the page's address stays the workspace's that lists it. An entry that names a
+ * `workspace` and no `id` declares that workspace (`{ workspace, name? }`): the person's workspaces list it, with no
+ * modules, and its name when it gives one.
  *
  * The file is loaded once at boot. A host that names a file the shell cannot load stops the start: falling back to
  * "no host" would silently drop who the person is and where the sidebar comes from.
@@ -86,7 +89,7 @@ function createHost({ person, sidebar, pages }, shell) {
 
   // The host's sidebar list → the `user.workspaces` shape the chrome already draws. Each entry: { id, name?, icon?,
   // group?, origin?, workspace? }, or { workspace, name? } declaring a workspace; `origin` is where the module's frame
-  // lives (under the host, not on this machine).
+  // lives (under the host, not on this machine), at that origin's global address.
   async function sidebarWorkspaces(req, who) {
     let list = [];
     try { list = await sidebar(req, who); }
@@ -176,9 +179,12 @@ function createHost({ person, sidebar, pages }, shell) {
       return null;
     },
 
-    /** The host's own pages, by path, for the page's bootstrap: shown in the chrome's content area, not in a frame. */
+    /**
+     * For the page's bootstrap: the global workspace's name (where an entry with an origin has its frame, and where a
+     * bare page path goes) and the host's own pages, by path, shown in the chrome's content area, not in a frame.
+     */
     bootstrap() {
-      return pages ? { globalWorkspace: GLOBAL_WORKSPACE, pages: [...pages.paths].map(([p, x]) => ({ path: p, ...x })) } : {};
+      return { globalWorkspace: GLOBAL_WORKSPACE, ...(pages ? { pages: [...pages.paths].map(([p, x]) => ({ path: p, ...x })) } : {}) };
     },
 
     /**

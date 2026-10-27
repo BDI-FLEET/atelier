@@ -11,7 +11,7 @@ export const FILES = [
   'clone.js', 'computers.js', 'config.js', 'create.js', 'data.js', 'files.js', 'frame.jsx', 'frames.js',
   'host-pages.jsx', 'hosted.js', 'login-screen.js', 'login.js', 'logout.js', 'logs.js', 'module-frame.jsx',
   'module-json.js', 'module-serve.js', 'modules-git.js', 'ops.js', 'ps.js', 'push.js', 'releases.js', 'remote.js',
-  'repo.js', 'restart.js', 'router.js', 'run.js', 'sandbox.js', 'session.js', 'whoami.js', 'ws-bridge.js',
+  'repo.js', 'restart.js', 'router.js', 'run.js', 'sandbox.js', 'session.js', 'user-modules.js', 'whoami.js', 'ws-bridge.js',
 ]
 
 /* Where the waits, sizes and counts of those files live: the one file of ours the measures over FILES leave out. */

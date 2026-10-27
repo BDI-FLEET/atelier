@@ -38,6 +38,17 @@ test("a sidebar entry that names a workspace and no id declares the workspace: l
   ])
 })
 
+test("an app with an origin may be listed in two workspaces, an entry in each with the origin, and the bootstrap names the global workspace its frame lives in for a host with no pages", async () => {
+  const file = put('two.js', `export function sidebar() { return [
+    { id: 'notes', origin: 'https://m-notes.apps.example', workspace: 'halden' }, { id: 'notes', origin: 'https://m-notes.apps.example', workspace: 'team' },
+  ] }\n`)
+  const host = await quiet(() => loadHost(file, DIR, {}))
+  const user = await host.gate({ headers: {} }, { id: 'local', workspaces: [] }, async (req, d) => d)
+  const notes = { id: 'notes', meta: {}, origin: 'https://m-notes.apps.example' }
+  assert.deepEqual(user.workspaces, [{ id: 'global', modules: [] }, { id: 'halden', modules: [notes] }, { id: 'team', modules: [notes] }])
+  assert.deepEqual(host.bootstrap(), { globalWorkspace: 'global' })
+})
+
 test("a page says which workspaces list it, the global one or the others, none for every one; the bootstrap carries it and any other word stops the load", async () => {
   put('w/home.jsx', 'export default () => null\n')
   put('w/plans.jsx', 'export default () => null\n')

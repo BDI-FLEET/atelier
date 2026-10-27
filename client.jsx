@@ -25,6 +25,7 @@
 import { resolveModuleChrome, missingChrome } from './chrome-resolve.js';
 import { wireWsBridge } from './ws-bridge.js';
 import { ModuleFrame } from './module-frame.js';
+import { flattenUserModules } from './user-modules.js';
 import { pageEntriesOf, withPages, pageQid, hostPageFor, barePageAddress, HostPage, SignedOut } from './host-pages.js';
 
 const { useState, useEffect, useRef } = React;
@@ -222,25 +223,6 @@ function refreshChromeStyles() {
   next.addEventListener('error', drop);   // a rebuild that 500s shouldn't strand two links
   cur.removeAttribute('id');               // the replacement owns the id from here
   cur.parentNode.insertBefore(next, cur.nextSibling);
-}
-
-function flattenUserModules(user) {
-  if (!user) return [];
-  const out = [];
-  for (const ws of user.workspaces || []) {
-    for (const m of ws.modules || []) {
-      out.push({
-        id: m.id,
-        qid: `${ws.id}/${m.id}`,
-        workspace: ws.id,
-        hasFrontend: m.hasFrontend !== false,
-        meta: m.meta || {},
-        // Where its frame lives: a host's sidebar may name it; else this instance's own origin for the module.
-        origin: m.origin || (window.__ATELIER__?.frames || {})[`${ws.id}/${m.id}`] || null,
-      });
-    }
-  }
-  return out;
 }
 
 /* =========================================================================
@@ -654,6 +636,7 @@ function App() {
       element: React.createElement(ModuleFrame, {
         key: activeMod.qid,
         qid: activeMod.qid,
+        frameQid: activeMod.frameQid,
         origin: activeMod.origin,
         route: urlState.rest,
         title: activeMod.meta?.name || activeMod.id,

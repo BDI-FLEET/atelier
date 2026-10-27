@@ -1,4 +1,4 @@
-// The page's script and the files beside it (module-frame.jsx, host-pages.jsx, ws-bridge.js, chrome-resolve.js): the
+// The page's script and the files beside it (module-frame.jsx, user-modules.js, host-pages.jsx, ws-bridge.js, chrome-resolve.js): the
 // browser loads each one by one, so a name client.jsx asks for that its file does not export only fails in a browser.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
