@@ -11,7 +11,7 @@ globalThis.window = { __ATELIER__: {} }
 const pages = await import(`data:text/javascript,${encodeURIComponent((await getJsx(path.join(ROOT, 'host-pages.jsx'))).content)}`)
 
 const PAGES = [
-  { path: '/', title: 'Home', src: '/_atelier/pages/home.js', icon: 'house' },
+  { path: '/', title: 'Home', src: '/_atelier/pages/home.js', icon: 'house', primary: true },
   { path: '/companies', title: 'Companies', src: '/_atelier/pages/companies.js' },
   { path: '/agents', title: 'Agents', src: '/_atelier/pages/agents.js', workspaces: 'global' },
   { path: '/plans', title: 'Plans', src: '/_atelier/pages/plans.js', workspaces: 'others' },
@@ -64,4 +64,9 @@ test("the chrome is handed every workspace with its pages among its modules, so 
     [['global', undefined, ['global/', 'global/companies', 'global/agents', 'notes']], ['halden', 'Halden', ['halden/', 'halden/companies', 'halden/plans']]])
   assert.deepEqual(WORKSPACES[1].modules, [], "the person's workspaces stay as the server gave them")
   assert.deepEqual(pages.pageEntriesOf(WORKSPACES).map((e) => e.qid), ['global/', 'global/companies', 'global/agents', 'halden/', 'halden/companies', 'halden/plans'])
+})
+
+test("the page the host marks primary is the one primary rail item; every other page is not, so a chrome that sorts primary first then by name leads with it", () => {
+  const primary = pages.pageEntries('halden').map((e) => [e.page, e.meta.primary])
+  assert.deepEqual(primary, [['/', true], ['/companies', false], ['/plans', false]])
 })

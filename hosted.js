@@ -13,7 +13,7 @@
  * The file is loaded once at boot. A host that names a file the shell cannot load stops the start: falling back to
  * "no host" would silently drop who the person is and where the sidebar comes from.
  *
- * The host's own pages (pages are the host's, apps are frames): `pages` maps a path to { title, file, icon?, sidebar?,
+ * The host's own pages (pages are the host's, apps are frames): `pages` maps a path to { title, file, icon?, sidebar?, primary?,
  * workspaces? } (each listed in the sidebar as an entry, in the order given, before the modules, unless sidebar: false;
  * in every workspace, or only in the global one with workspaces: 'global', or only in the others with 'others'; a page
  * lives at /<ws>/<path> in each of those workspaces, listed or not, and host-pages.jsx resolves the address), and the one
@@ -54,9 +54,12 @@ function loadHostPages(pages, base) {
     out.dir = dir;
     if (def.icon !== undefined && (typeof def.icon !== 'string' || !PAGE_ICON.test(def.icon))) throw new Error(`pages: "${key}": icon is a lucide name (a-z, 0-9, -)`);
     if (def.sidebar !== undefined && typeof def.sidebar !== 'boolean') throw new Error(`pages: "${key}": sidebar is true or false`);
+    if (def.primary !== undefined && typeof def.primary !== 'boolean') throw new Error(`pages: "${key}": primary is true or false`);
     if (def.workspaces !== undefined && !PAGE_WORKSPACES.includes(def.workspaces)) throw new Error(`pages: "${key}": workspaces is ${PAGE_WORKSPACES.map((w) => `'${w}'`).join(' or ')}`);
-    // listed in the sidebar unless it says sidebar: false, in the workspaces it names; its icon for the chrome's rail
+    // listed in the sidebar unless it says sidebar: false, in the workspaces it names; its icon for the chrome's rail; primary: the
+    // chrome puts it before every other entry
     const page = { title: def.title, src: `/_atelier/pages/${name}.js`, ...(def.icon ? { icon: def.icon } : {}), ...(def.sidebar === false ? { sidebar: false } : {}),
+      ...(def.primary === true ? { primary: true } : {}),
       ...(def.workspaces ? { workspaces: def.workspaces } : {}) };
     if (key === 'signIn') out.signIn = page;
     else out.paths.set(key.length > 1 ? key.replace(/\/+$/, '') : key, page);

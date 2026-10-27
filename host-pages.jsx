@@ -34,13 +34,13 @@ export const pageQid = (workspace, path) => `${workspace}/${path.slice(1)}`;
 /**
  * The host's pages as sidebar entries, Home first: each page that lives in `workspace` and the host did not mark
  * `sidebar: false`, in the host's order, as a rail item of that workspace, its qid pageQid's (the chrome links an item to
- * `/<qid>`), `meta.primary` so a chrome that puts primary items first puts them before the apps, `page` its path. Never a
- * module, never a frame.
+ * `/<qid>`), `meta.primary` for the page the host marks `primary` alone, so a chrome that puts primary items first and sorts
+ * the rest by name puts that one page before everything, `page` its path. Never a module, never a frame.
  */
 export function pageEntries(workspace) {
   return hostPages().filter((p) => p.sidebar !== false && livesIn(p, workspace)).map((p, i) => ({
     id: `page:${p.path}`, qid: pageQid(workspace, p.path), workspace, hasFrontend: true, origin: null, page: p.path,
-    meta: { name: p.title, icon: p.icon || 'file', primary: true, order: i },
+    meta: { name: p.title, icon: p.icon || 'file', primary: p.primary === true, order: i },
   }));
 }
 /** Every workspace's page entries, workspace by workspace: what the chrome is handed among `modules` (⌘K finds a page of another workspace). */
