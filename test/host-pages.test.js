@@ -50,6 +50,14 @@ test("a page's entry in a workspace is its rail item there: its qid the workspac
   assert.equal(pages.pageQid('global', '/'), 'global/')
 })
 
+test("a page listed nowhere lives in the workspaces its workspaces names, in every one when it names none", () => {
+  window.__ATELIER__.pages = [...PAGES, { path: '/plan', title: 'Plan', src: '/_atelier/pages/plan.js', sidebar: false, workspaces: 'others' }]
+  try {
+    assert.deepEqual([pages.hostPageFor('/halden/plan')?.page.title, pages.hostPageFor('/global/plan'), pages.hostPageFor('/global/activate')?.page.title], ['Plan', null, 'Activate'])
+    assert.deepEqual(pages.pageEntries('halden').map((e) => e.page), ['/', '/companies', '/plans'])
+  } finally { window.__ATELIER__.pages = PAGES }
+})
+
 test("the chrome is handed every workspace with its pages among its modules, so one with pages and no module is in the picker, and every workspace's pages for ⌘K", () => {
   const shown = pages.withPages(WORKSPACES)
   assert.deepEqual(shown.map((w) => [w.id, w.name, w.modules.map((m) => m.qid ?? m.id)]),

@@ -1,7 +1,8 @@
 /* atelier · the host's pages in the page (hosted.js is the shell's side): pages are the host's own, apps are frames.
  *
  * A page lives in a workspace: `/<ws>/<path>` is the host's page `<path>` in the workspace `<ws>` (Home, at '/', is
- * `/<ws>/`), in each of the person's workspaces that lists it (a page's `workspaces`), a page listed nowhere in every one.
+ * `/<ws>/`), in each of the person's workspaces its `workspaces` names (every one when it names none), listed in the
+ * sidebar there unless it says `sidebar: false`.
  * A bare `/<path>` of a link made before is taken to the page in the global workspace; `/` lands as any address with no
  * workspace does.
  *
@@ -22,24 +23,22 @@ function loadHostPage(src) {
 }
 const boot = () => window.__ATELIER__ || {};
 const hostPages = () => boot().pages || [];
-/** Whether a page is listed in a workspace: the one its `workspaces` names (the global workspace, or every other one), else every one. */
-function listedIn(page, workspace) {
+/** Whether a page lives in a workspace: the ones its `workspaces` names (the global workspace, or every other one), else every one. */
+function livesIn(page, workspace) {
   if (!page.workspaces) return true;
   const global = workspace === boot().globalWorkspace;
   return page.workspaces === boot().globalWorkspace ? global : !global;
 }
-/** A page lives in each workspace that lists it; one listed nowhere (`sidebar: false`) lives in every workspace. */
-const livesIn = (page, workspace) => page.sidebar === false || listedIn(page, workspace);
 /** A page's qid in a workspace, the address the chrome links it to without its leading slash: `<ws>/<path>`, Home's `<ws>/`. */
 export const pageQid = (workspace, path) => `${workspace}/${path.slice(1)}`;
 /**
- * The host's pages as sidebar entries, Home first: each page the host did not mark `sidebar: false` and that is listed
- * in `workspace`, in the host's order, as a rail item of that workspace, its qid pageQid's (the chrome links an item to
+ * The host's pages as sidebar entries, Home first: each page that lives in `workspace` and the host did not mark
+ * `sidebar: false`, in the host's order, as a rail item of that workspace, its qid pageQid's (the chrome links an item to
  * `/<qid>`), `meta.primary` so a chrome that puts primary items first puts them before the apps, `page` its path. Never a
  * module, never a frame.
  */
 export function pageEntries(workspace) {
-  return hostPages().filter((p) => p.sidebar !== false && listedIn(p, workspace)).map((p, i) => ({
+  return hostPages().filter((p) => p.sidebar !== false && livesIn(p, workspace)).map((p, i) => ({
     id: `page:${p.path}`, qid: pageQid(workspace, p.path), workspace, hasFrontend: true, origin: null, page: p.path,
     meta: { name: p.title, icon: p.icon || 'file', primary: true, order: i },
   }));
