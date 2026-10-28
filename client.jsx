@@ -30,7 +30,8 @@ import { pageEntriesOf, withPages, pageQid, hostPageFor, barePageAddress, HostPa
 
 const { useState, useEffect, useRef } = React;
 
-// What a chrome's `loadedModules` reads: modules run in their frames, so the page loads no module bundle.
+// What a chrome's `loadedModules` reads: modules run in their frames, so the page loads no module bundle, and a module's
+// `Sidebar` export (0.22.0) is not handed to the chrome here; its entry's `hasSidebar` still says it has one.
 const NO_MODULE_BUNDLES = Object.freeze({});
 
 // The real-time channel and `self` (ws-bridge.js); the host's sign-in page has no session, so no channel.

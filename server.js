@@ -481,8 +481,7 @@ async function extractMetaSandboxed(src) {
   }
 }
 
-async function readMeta(src, label) {
-  const code = fs.readFileSync(src, 'utf8');
+async function readMeta(src, label, code = fs.readFileSync(src, 'utf8')) {
   // Static-first: read the literal `meta` from source without running the
   // module. This is the path for ~every module (their `meta` is a literal),
   // so a frontend's top-level code does NOT execute anywhere at discovery.
@@ -500,6 +499,20 @@ async function readMeta(src, label) {
   return sand.meta;
 }
 
+// Does the frontend export a `Sidebar`? Read from the same source as meta, so
+// the rail can mark the module on first paint without loading its bundle and
+// without the author keeping a flag in sync. Line-anchored, so a commented-out
+// export doesn't count; the loaded bundle stays the final word on the client.
+function exportsSidebar(code) {
+  if (/^export\s+(?:async\s+)?(?:function\b\s*\*?|const|let|var|class)\s*Sidebar\b/m.test(code)) return true;
+  for (const [, list] of code.matchAll(/^export\s*\{([^}]*)\}/gm)) {
+    for (const spec of list.split(',')) {
+      if (spec.trim().split(/\s+as\s+/).pop().trim() === 'Sidebar') return true;
+    }
+  }
+  return false;
+}
+
 async function getModuleMeta(m) {
   if (!m.hasFrontend) return {};
   const src = path.join(m.dir, 'frontend.jsx');
@@ -509,14 +522,16 @@ async function getModuleMeta(m) {
   const key = `${mtimeMs}:${decl.mtimeMs}`;
   const cached = metaCache.get(m.qualifiedId);
   if (cached && cached.mtimeMs === key) return cached.meta;
-  let meta = {};
+  let meta = {}, hasSidebar = false;
   try {
-    meta = await readMeta(src, m.qualifiedId);
+    const code = fs.readFileSync(src, 'utf8');
+    meta = await readMeta(src, m.qualifiedId, code);
+    hasSidebar = exportsSidebar(code);
   } catch (err) {
     console.warn(`  ! meta read failed for ${m.qualifiedId}: ${err.message}`);
   }
   meta = { ...meta, ...decl.meta };
-  metaCache.set(m.qualifiedId, { meta, mtimeMs: key });
+  metaCache.set(m.qualifiedId, { meta, mtimeMs: key, hasSidebar });
   return meta;
 }
 
@@ -1348,6 +1363,7 @@ function buildDefaultUser({ metaByQId } = {}) {
     // them as infrastructure, not rail entries.
     if (meta.isChrome === true || meta.hidden === true) continue;
     const entry = { id: m.id, meta };
+    if (metaCache.get(m.qualifiedId)?.hasSidebar) entry.hasSidebar = true;
     if (!wsMap.has(m.workspace)) wsMap.set(m.workspace, []);
     wsMap.get(m.workspace).push(entry);
   }
@@ -1932,6 +1948,25 @@ function versionRelativeImports(code, v) {
     .replace(/(\bimport\s+)(["'])(\.{1,2}\/[^"'?]*)(\2)/g,      (_, a, q, p) => `${a}${q}${p}${tag}${q}`);
 }
 
+// The shell's own build inputs, fingerprinted once per process. A BUILT asset
+// (a module or chrome bundle, the chrome's CSS) depends on them as much as on
+// the module's sources — the JSX shims, build.js, the installed esbuild /
+// Tailwind / React — so they are part of its ETag. Without this, a shell change
+// ships new bytes under an old mtime-keyed ETag and browsers keep their stale
+// copy (a 304) after the restart or upgrade. Shell files are pinned to the
+// process, so computing it at startup is exact.
+const BUILD_FINGERPRINT = (() => {
+  const h = crypto.createHash('sha1');
+  const add = (f) => { try { h.update(f).update(fs.readFileSync(f)); } catch {} };
+  add(path.join(HOST_DIR, 'build.js'));
+  add(path.join(HOST_DIR, 'package.json'));
+  try { for (const f of fs.readdirSync(path.join(HOST_DIR, 'shims')).sort()) add(path.join(HOST_DIR, 'shims', f)); } catch {}
+  for (const dep of ['esbuild', '@tailwindcss/node', 'react']) {
+    try { h.update(dep + '@' + hostRequire(`${dep}/package.json`).version); } catch {}
+  }
+  return h.digest('hex').slice(0, 8);
+})();
+
 // gzip: text over 1 KiB — below that the framing outweighs the saving.
 const GZIP_MIN = 1024;
 const GZIP_TYPES = /^(text\/|application\/(javascript|json|xml))/;
@@ -1971,21 +2006,21 @@ async function serveAsset(req, res, url, asset = resolveAssetSource(url.pathname
       // Cold loads carry no `?v`, so this is inert for normal serving.
       const v = isModuleFrontend && url.searchParams.get('v');
       body = (v && /^\d+$/.test(v)) ? versionRelativeImports(built.content, v) : built.content;
-      etag = `"${built.mtimeMs}${v ? `-${v}` : ''}"`;
+      etag = `"${BUILD_FINGERPRINT}-${built.mtimeMs}${v ? `-${v}` : ''}"`;
     } else if (asset.kind === 'css') {
       const built = asset.scan
         ? await getCss(asset.src, asset.scan, HOST_DIR, asset.key)   // a frame's sheet: its own module's classes only
         : await getCss(asset.src, cssScanSources(), HOST_DIR);
       headers['Content-Type'] = built.contentType;
       body = built.content;
-      etag = `"${built.mtimeMs}"`;
+      etag = `"${BUILD_FINGERPRINT}-${built.mtimeMs}"`;
     } else {
       headers['Content-Type'] = asset.contentType;
       body = fs.readFileSync(asset.src);
       try { etag = `"${fs.statSync(asset.src).mtimeMs}"`; } catch {}
     }
-    // Conditional serving — the builds are mtime-keyed already, so the key IS
-    // the validator. `no-cache` means "revalidate every time": a repeat page
+    // Conditional serving — the builds are mtime-keyed already, so the key (plus
+    // the shell's BUILD_FINGERPRINT for built assets) IS the validator. `no-cache` means "revalidate every time": a repeat page
     // load costs a 304 instead of re-downloading multi-MB dev bundles, while
     // an edited file (new mtime → new ETag) ships fresh bytes immediately —
     // hot-reload semantics untouched.

@@ -31,6 +31,16 @@ describe('conditional GETs on assets', () => {
   test('react vendor file revalidates', () => roundTrip('/assets/react.js'))
   test('module frontend revalidates', () => roundTrip('/modules/global/epsilon/frontend.js'))
 
+  test('built assets carry the shell build fingerprint — a shell change is a new ETag', async () => {
+    // A module bundle depends on the shell's build inputs (JSX shims, build.js,
+    // esbuild/React versions) as much as on its own sources; an mtime-only ETag
+    // let browsers keep a stale bundle across a shell upgrade.
+    const built = (await fetch(server.base + '/modules/global/epsilon/frontend.js')).headers.get('etag')
+    const vendor = (await fetch(server.base + '/assets/react.js')).headers.get('etag')
+    assert.match(built, /^"[0-9a-f]{8}-[\d.]+"$/, 'built asset: fingerprint + mtime')
+    assert.match(vendor, /^"[\d.]+"$/, 'static file: its own mtime is enough')
+  })
+
   test('a mismatched ETag still gets fresh bytes', async () => {
     const r = await fetch(server.base + '/assets/client.js', { headers: { 'If-None-Match': '"nope"' } })
     assert.equal(r.status, 200)

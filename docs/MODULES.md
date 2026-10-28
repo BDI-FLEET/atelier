@@ -383,6 +383,57 @@ What you can rely on:
 
 `useRoute` is opt-in: a module that keeps its sub-view state in memory and never touches the URL is perfectly fine. `location.hash` and `?query` still work too — but `useRoute` is the supported way to get deep-linkable, back/forward-correct sub-views.
 
+## Module sidebar — `export function Sidebar`
+
+A module with its own navigation can export a `Sidebar` component next to its default export. While the module is active, a chrome that supports it renders that sidebar **in place of its rail** — keeping a header of its own (the module's name and the way back to the rail), so the user can always get out. A chrome without support ignores the export, and the module still works through its page.
+
+```jsx
+import { SidebarBody, SidebarSection, SidebarItem, SidebarLabel, Icon } from '@atelier/kit';
+
+export const meta = { name: 'Contacts', icon: 'users' };
+
+const self = window.__atelier.self(import.meta.url);
+const SECTIONS = [['', 'Overview', 'layout-grid'], ['people', 'People', 'users'], ['map', 'Map', 'map']];
+
+export function Sidebar() {
+  const { path, navigate } = window.__atelier.useRoute();
+  // A real href (new-tab clicks work, and a chrome can treat it as a place);
+  // the plain click routes in-app.
+  const link = (sub) => ({
+    href: `/${self.qid}${sub ? `/${sub}` : ''}`,
+    onClick: (e) => {
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+      e.preventDefault();
+      navigate(sub);
+    },
+  });
+  return (
+    <SidebarBody>
+      <SidebarSection>
+        {SECTIONS.map(([sub, name, icon]) => (
+          <SidebarItem key={sub} current={path.split('/')[0] === sub} {...link(sub)}>
+            <Icon name={icon} />
+            <SidebarLabel>{name}</SidebarLabel>
+          </SidebarItem>
+        ))}
+      </SidebarSection>
+    </SidebarBody>
+  );
+}
+
+export default function Module() {
+  const { path } = window.__atelier.useRoute();
+  return <div>{/* render the section `path` names */}</div>;
+}
+```
+
+- **Share state through the route.** `Sidebar` and the default export render in different parts of the page, so they don't share React context — `useRoute` (or `ctx.module`-backed data) is what keeps them in agreement, and it makes every sidebar entry deep-linkable.
+- **Build it from the chrome's kit** — the sidebar primitives and icons the chrome itself uses — so it reads as part of the shell. The primitives a chrome publishes are its own choice (see [Publishing primitives](#publishing-primitives--atelierkit)); a chrome that supports module sidebars documents which ones to use, and what it draws itself, in its own README.
+- **Places get an `href`, actions don't.** Build a navigational entry's `href` from `self(import.meta.url).qid` (never a literal path) and route the plain click through `navigate` — new-tab clicks work, and a chrome can tell places from actions.
+- **No `eager`, no flag.** The sidebar only shows while its module is active, and the active module's bundle is always loaded. The shell reads the `Sidebar` export straight from `frontend.jsx` (a top-level `export function` / `const` / `export { … as Sidebar }`), so a chrome knows which modules have one before any bundle loads — the module entries carry `hasSidebar: true`.
+- **What the chrome does with it** — the header, the transition, keyboard navigation — is the chrome's call, like everything visual.
+- **In this shell, modules run in frames** on their own origin, so the page never imports a module's bundle: the chrome gets `hasSidebar` on the module's entry, not the `Sidebar` component. Handing the sidebar over the frame's channel is open.
+
 ---
 
 ## Sidecar servers
@@ -465,7 +516,7 @@ The shell calls `chrome(props)` with:
 |---|---|
 | `boot` | `{ mode, label, … }` — `mode` is `'host'` (a normal instance) or `'standalone'` (a single module via `dev:module`); `label` is the optional instance name from config, or `null`. Also carries `chromeQid` (the chrome resolved for this document), `defaultChromeQid`, `chromes` (the available chrome qids), and `backendErrors` (`[{ qid, message }]` for modules whose backend failed to mount) |
 | `user` | the post-auth user (`{ id, name, workspaces }`) |
-| `modules` | `[{ qid, id, workspace, hasFrontend, meta }]` — everything mounted |
+| `modules` | `[{ qid, id, workspace, hasFrontend, hasSidebar, meta }]` — everything mounted; `hasSidebar` is read from the frontend's source (it exports `Sidebar`) |
 | `workspaces` | `[{ id, name?, modules: [{ id, meta }] }]` |
 | `workspace` | the currently-routed workspace id |
 | `activeQid` | the active module's qualifiedId, or `null` |

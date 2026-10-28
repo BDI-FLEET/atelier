@@ -12,6 +12,7 @@ export function flattenUserModules(user) {
         qid: `${ws.id}/${m.id}`,
         workspace: ws.id,
         hasFrontend: m.hasFrontend !== false,
+        hasSidebar: m.hasSidebar === true,
         meta: m.meta || {},
         // Where its frame lives: the origin a host's entry names, the app alone in the global workspace there,
         // whatever workspace lists it here; else this instance's own origin for the module, at its own qid.

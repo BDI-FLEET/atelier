@@ -26,7 +26,7 @@ window.__ATELIER__ = {
   frames: { 'team/board': 'http://board.team.localhost:4321' },
   user: { id: 'ana', workspaces: [
     { id: 'halden', modules: [{ id: 'notes', meta: {}, origin: 'https://m-notes.apps.example' }] },
-    { id: 'team', modules: [{ id: 'board', meta: {} }] },
+    { id: 'team', modules: [{ id: 'board', meta: {}, hasSidebar: true }] },
   ] },
 }
 const [notes, board] = flattenUserModules(window.__ATELIER__.user)
@@ -34,6 +34,10 @@ const [notes, board] = flattenUserModules(window.__ATELIER__.user)
 test("a host's entry with an origin, listed in a company's workspace, has its qid there and its frame at the origin's global address, and an instance's own module its frame at its own qid", () => {
   assert.deepEqual([notes.qid, notes.origin, notes.frameQid], ['halden/notes', 'https://m-notes.apps.example', 'global/notes'])
   assert.deepEqual([board.qid, board.origin, board.frameQid], ['team/board', 'http://board.team.localhost:4321', 'team/board'])
+})
+
+test("a module's entry says whether its frontend exports a Sidebar, as the server read it from the source, and nothing else is loaded for it", () => {
+  assert.deepEqual([notes.hasSidebar, board.hasSidebar], [false, true])
 })
 
 test("a module's frame opens at its frame's own address on its origin with the page's route, whatever workspace of the page lists it", () => {
