@@ -99,6 +99,8 @@ function createHost({ person, sidebar, pages, handed }, shell) {
   const pageFile = (name) => ['.jsx', '.js'].map((e) => path.join(pages.dir, name + e)).find((f) => fs.existsSync(f)) || null;
   /** A page as the document names it up front: its served address and its file. */
   const pageEntry = (src) => ({ url: src, file: pageFile(PAGE_FILE.exec(src)[1]) });
+  /** The host's pages as the browser and page-at.js take them: each with its path. */
+  const pageList = () => [...pages.paths].map(([p, x]) => ({ path: p, ...x }));
 
   async function sidebarWorkspaces(req, who) {
     let list = [];
@@ -205,7 +207,7 @@ function createHost({ person, sidebar, pages, handed }, shell) {
      * bare page path goes) and the host's own pages, by path, shown in the chrome's content area, not in a frame.
      */
     bootstrap() {
-      return { globalWorkspace: GLOBAL_WORKSPACE, ...(pages ? { pages: [...pages.paths].map(([p, x]) => ({ path: p, ...x })) } : {}) };
+      return { globalWorkspace: GLOBAL_WORKSPACE, ...(pages ? { pages: pageList() } : {}) };
     },
 
     /** The folders the host's assets are built from, for the shell's asset tag: its pages'. */
@@ -217,7 +219,7 @@ function createHost({ person, sidebar, pages, handed }, shell) {
      */
     pageFor(pathname, user) {
       if (!pages) return null;
-      const found = pageAt(pathname, { pages: [...pages.paths].map(([p, x]) => ({ path: p, ...x })), globalWorkspace: GLOBAL_WORKSPACE, workspaces: user?.workspaces || [] });
+      const found = pageAt(pathname, { pages: pageList(), globalWorkspace: GLOBAL_WORKSPACE, workspaces: user?.workspaces || [] });
       return found ? pageEntry(found.page.src) : null;
     },
 
