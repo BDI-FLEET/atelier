@@ -141,7 +141,7 @@ if (!AUTH && !LOOPBACK_HOST) {
 }
 
 const host = HOSTED ? await loadHost(HOSTED, ROOT, {
-  mode: MODE, label: LABEL, serveIndex, serveAsset, getModules, getMetaByQId, resolveDefaultChromeQid, buildImportMap, assetTag, addressOf,
+  mode: MODE, label: LABEL, serveIndex, serveAsset, getModules, getMetaByQId, resolveDefaultChromeQid, buildImportMap, assetTag, addressOf, preloadTags,
 }).catch((err) => { console.error(`\n  hosted: ${err.message}\n`); process.exit(1); }) : null;
 
 // Hoisted up here (out of the WS section below) because module mounting
@@ -1583,11 +1583,47 @@ async function serveIndex(req, res) {
   );
   html = html.replace('<!--__ATELIER_IMPORTMAP__-->', importMapTag);
   html = html.replace('<!--__ATELIER_CHROME_STYLES__-->', chromeStylesTag);
+  const page = host?.pageFor ? host.pageFor(new URL(req.url, 'http://x').pathname, user) : null;
+  html = html.replace('<!--__ATELIER_PRELOAD__-->', await preloadTags(chromeQid, page ? [page] : []));
   res.writeHead(200, {
     'Content-Type': 'text/html; charset=utf-8',
     'Cache-Control': 'no-store',
   });
   res.end(html);
+}
+
+// What the document names up front, for the browser to fetch in one wave instead of one import level per round trip:
+// the shell's own imports (client.js's, transitively), the chrome's bundle, and each page handed (its served address
+// and its file) with its static imports, transitively. A relative import is the file beside its importer at the
+// address beside its importer's (`.js` served from the `.jsx` beside it); `@atelier/kit` is the import map's bundle,
+// which has no imports of its own; any other bare import is the browser's. Each address once, in discovery order.
+const STATIC_IMPORT = /^\s*(?:import|export)\s+(?:[^'";]*?\s+from\s+)?['"]([^'"]+)['"]/gm;
+async function importsOf(url, file, chromeQid, seen) {
+  if (seen.has(url)) return [];
+  seen.add(url);
+  const out = [url];
+  let content;
+  try { content = (file.startsWith(HOST_DIR + path.sep) ? await getPinnedShellJsx(file) : await getJsx(file)).content; } catch { return out; }
+  const kit = buildImportMap(chromeQid)?.imports['@atelier/kit']?.split('?')[0];
+  for (const [, spec] of String(content).matchAll(STATIC_IMPORT)) {
+    if (/^\.\.?\//.test(spec)) {
+      const bare = spec.split('?')[0];
+      const at = new URL(bare, `http://x${url}`).pathname, beside = path.resolve(path.dirname(file), bare);
+      const jsx = beside.replace(/\.js$/, '.jsx');
+      out.push(...await importsOf(at, beside.endsWith('.js') && fs.existsSync(jsx) ? jsx : beside, chromeQid, seen));
+    } else if (spec === '@atelier/kit' && kit && !seen.has(kit)) {
+      seen.add(kit);
+      out.push(kit);
+    }
+  }
+  return out;
+}
+async function preloadTags(chromeQid, pages) {
+  const seen = new Set();
+  const urls = (await importsOf('/assets/client.js', path.join(HOST_DIR, 'client.jsx'), chromeQid, seen)).slice(1);
+  if (chromeQid) urls.push(`/modules/${chromeQid}/frontend.js`);
+  for (const p of pages) if (p?.file) urls.push(...await importsOf(p.url, p.file, chromeQid, seen));
+  return urls.map((u) => `<link rel="modulepreload" href="${addressOf(u)}">`).join('\n  ');
 }
 
 // ------------------------------------------------------------------------

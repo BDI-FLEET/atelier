@@ -31,6 +31,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolvePathEntry, GLOBAL_WORKSPACE } from './discovery.js';
 import { CALLER_HEADER, MODULE_ID, headerObject } from './router.js';
+import { pageAt } from './page-at.js';
 import { PAGE_ICON_CHARS } from './limits.js';
 
 const PAGE_ICON = new RegExp(`^[a-z0-9-]{1,${PAGE_ICON_CHARS}}$`);
@@ -93,6 +94,11 @@ function createHost({ person, sidebar, pages }, shell) {
   // The host's sidebar list → the `user.workspaces` shape the chrome already draws. Each entry: { id, name?, icon?,
   // group?, origin?, workspace? }, or { workspace, name? } declaring a workspace; `origin` is where the module's frame
   // lives (under the host, not on this machine), at that origin's global address.
+  /** A page's file by the name its served address carries, .jsx first; null when none. */
+  const pageFile = (name) => ['.jsx', '.js'].map((e) => path.join(pages.dir, name + e)).find((f) => fs.existsSync(f)) || null;
+  /** A page as the document names it up front: its served address and its file. */
+  const pageEntry = (src) => ({ url: src, file: pageFile(PAGE_FILE.exec(src)[1]) });
+
   async function sidebarWorkspaces(req, who) {
     let list = [];
     try { list = await sidebar(req, who); }
@@ -129,6 +135,7 @@ function createHost({ person, sidebar, pages }, shell) {
     const bootstrap = { mode: shell.mode, label: shell.label, signedOut: true, signIn: pages.signIn, chromeQid, assetTag: shell.assetTag() };
     let html = template.replace('/*__ATELIER_BOOTSTRAP__*/', `window.__ATELIER__ = ${JSON.stringify(bootstrap).replace(/</g, '\\u003c')};`);
     html = html.replace('<!--__ATELIER_IMPORTMAP__-->', importMap ? `<script type="importmap">${JSON.stringify(importMap)}</script>` : '');
+    html = html.replace('<!--__ATELIER_PRELOAD__-->', await shell.preloadTags(chromeQid, [pageEntry(pages.signIn.src)]));
     html = html.replace('<!--__ATELIER_CHROME_STYLES__-->', chromeMod && fs.existsSync(path.join(chromeMod.dir, 'styles.css'))
       ? `<link id="atelier-chrome-styles" rel="stylesheet" href="${shell.addressOf(`/modules/${chromeQid}/styles.css`)}">` : '');
     res.writeHead(401, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
@@ -194,6 +201,16 @@ function createHost({ person, sidebar, pages }, shell) {
     sources() { return pages ? [pages.dir] : []; },
 
     /**
+     * The page an address names for this person, as the browser will resolve it (page-at.js), as the document names it
+     * up front: its served address and its file; null for any other address.
+     */
+    pageFor(pathname, user) {
+      if (!pages) return null;
+      const found = pageAt(pathname, { pages: [...pages.paths].map(([p, x]) => ({ path: p, ...x })), globalWorkspace: GLOBAL_WORKSPACE, workspaces: user?.workspaces || [] });
+      return found ? pageEntry(found.page.src) : null;
+    },
+
+    /**
      * The requests that are the host's before any session: its pages' code, the default chrome's stylesheet and kit
      * for its sign-in page (public, like the shell's own assets: the chrome is the look of the sign-in page, not a
      * tenant's module), and a page asked by nobody, which gets the sign-in page at that path rather than the gate's
@@ -203,7 +220,7 @@ function createHost({ person, sidebar, pages }, shell) {
       if (!pages) return false;
       const pg = PAGE_FILE.exec(url.pathname);
       if (pg) {
-        const src = ['.jsx', '.js'].map((e) => path.join(pages.dir, pg[1] + e)).find((f) => fs.existsSync(f));
+        const src = pageFile(pg[1]);
         if (!src) { res.writeHead(404); res.end('Not found'); return true; }
         await shell.serveAsset(req, res, url, { kind: 'jsx', src });
         return true;

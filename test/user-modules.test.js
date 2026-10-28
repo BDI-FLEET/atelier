@@ -2,9 +2,7 @@
 // files), run against a page's bootstrap: where each module the page lists has its frame, and the address the frame opens at.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import path from 'node:path'
-import { getJsx } from '../build.js'
-import { ROOT } from './ours.js'
+import { served } from './ours.js'
 
 globalThis.React = {
   useState: (init) => [typeof init === 'function' ? init() : init, () => {}],
@@ -16,7 +14,6 @@ globalThis.React = {
 }
 globalThis.document = { documentElement: { classList: { contains: () => false } } }
 globalThis.window = { __ATELIER__: {}, location: { origin: 'https://atelier.example' } }
-const served = async (file) => import(`data:text/javascript,${encodeURIComponent((await getJsx(path.join(ROOT, file))).content)}`)
 const { flattenUserModules } = await served('user-modules.js')
 const { ModuleFrame } = await served('module-frame.jsx')
 const { addressOf } = await served('host-pages.jsx')

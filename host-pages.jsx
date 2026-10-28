@@ -11,6 +11,8 @@
  * Props: { user, path, workspace, navigate(path) }.
  */
 
+import { pageAt, livesIn as lives } from './page-at.js';
+
 const { useState, useEffect } = React;
 
 const hostPageCache = new Map();   // src → Promise<component>
@@ -25,12 +27,7 @@ const boot = () => window.__ATELIER__ || {};
 /** An asset's address as the page imports it: with the shell's asset tag when the bootstrap carries one (hot reload off: the asset keeps). */
 export const addressOf = (p) => (boot().assetTag ? `${p}?v=${boot().assetTag}` : p);
 const hostPages = () => boot().pages || [];
-/** Whether a page lives in a workspace: the ones its `workspaces` names (the global workspace, or every other one), else every one. */
-function livesIn(page, workspace) {
-  if (!page.workspaces) return true;
-  const global = workspace === boot().globalWorkspace;
-  return page.workspaces === boot().globalWorkspace ? global : !global;
-}
+const livesIn = (page, workspace) => lives(page, workspace, boot().globalWorkspace);
 /** A page's qid in a workspace, the address the chrome links it to without its leading slash: `<ws>/<path>`, Home's `<ws>/`. */
 export const pageQid = (workspace, path) => `${workspace}/${path.slice(1)}`;
 /**
@@ -54,18 +51,7 @@ export const withPages = (workspaces) => workspaces.map((w) => ({ ...w, modules:
  * the page at '/'), `ws` one of the person's workspaces and the page living there → { page, workspace }; null for
  * anything else, and for an address a module of that workspace holds (the first segment of the path its id).
  */
-export function hostPageFor(pathname) {
-  const m = /^\/([^/]+)(\/.*)?$/.exec(pathname);
-  if (!m) return null;
-  let workspace;
-  try { workspace = decodeURIComponent(m[1]); } catch { return null; }
-  const ws = (boot().user?.workspaces || []).find((w) => w.id === workspace);
-  if (!ws) return null;
-  const path = (m[2] || '').replace(/\/+$/, '') || '/';
-  if ((ws.modules || []).some((x) => x.id === path.split('/')[1])) return null;
-  const page = hostPages().find((p) => p.path === path && livesIn(p, workspace));
-  return page ? { page, workspace } : null;
-}
+export const hostPageFor = (pathname) => pageAt(pathname, { pages: hostPages(), globalWorkspace: boot().globalWorkspace, workspaces: boot().user?.workspaces || [] });
 /** A bare page path, as links made before pages lived in a workspace write it ('/companies'): its address in the global workspace; null for '/' and anything else. */
 export function barePageAddress(pathname) {
   const path = pathname.replace(/\/+$/, '');

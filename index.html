@@ -47,6 +47,11 @@
        import (so module bundles loaded later via import() resolve
        `@atelier/kit` correctly). -->
   <!--__ATELIER_IMPORTMAP__-->
+
+  <!-- Injected by atelier/server.js per request: <link rel="modulepreload"> for every module the page will import —
+       the shell's own, the chrome's bundle and the host's page the address names with its imports — so the browser
+       fetches them all in one wave after the document instead of one import level per round trip. -->
+  <!--__ATELIER_PRELOAD__-->
 </head>
 <body>
   <div id="root"></div>

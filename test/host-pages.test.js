@@ -2,13 +2,11 @@
 // which workspaces list each host page, and which page and workspace an address names.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import path from 'node:path'
-import { getJsx } from '../build.js'
-import { ROOT } from './ours.js'
+import { served } from './ours.js'
 
 globalThis.React = { useState: () => [null, () => {}], useEffect: () => {}, createElement: () => null }
 globalThis.window = { __ATELIER__: {} }
-const pages = await import(`data:text/javascript,${encodeURIComponent((await getJsx(path.join(ROOT, 'host-pages.jsx'))).content)}`)
+const pages = await served('host-pages.jsx')
 
 const PAGES = [
   { path: '/', title: 'Home', src: '/_atelier/pages/home.js', icon: 'house', primary: true },
