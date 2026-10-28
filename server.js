@@ -1550,6 +1550,7 @@ async function serveIndex(req, res) {
     chromes: chromeQids(metaByQId),
     assetTag: assetTag(),
     ...host?.bootstrap(),
+    ...(host ? { handed: await host.handed(req) } : {}),
     // Where each module this person sees is framed (a host's sidebar entry may carry its own `origin`, which wins).
     frames: frames.origins(user),
     // Seed only the backend errors this user can see — same per-module ACL as the

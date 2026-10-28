@@ -1,7 +1,7 @@
 /* atelier · the host switch: a JS file the host names (`hosted`, ATELIER_HOSTED). When set, the shell trusts the caller
  * header the host sets in front of it, and takes from the file, when it exports them, who the person is
- * (`person(req)`), the sidebar (`sidebar(req, person)`) and the host's own pages (`pages`). Without it: a plain
- * instance, and the caller header is ignored.
+ * (`person(req)`), the sidebar (`sidebar(req, person)`), the host's own pages (`pages`) and what a page gets up front
+ * (`handed(req, person)`, the bootstrap's `handed`). Without it: a plain instance, and the caller header is ignored.
  *
  * The sidebar is a list of entries, each a module listed in the workspace it names (the global one when it names none):
  * `{ id, name?, icon?, group?, origin?, workspace? }`. An entry with an `origin` may be listed in any workspace, and in
@@ -75,20 +75,21 @@ function loadHostPages(pages, base) {
  */
 export async function loadHost(file, root, shell) {
   const at = resolvePathEntry(String(file), root);
-  let person = null, sidebar = null, pages = null;
+  let person = null, sidebar = null, pages = null, handed = null;
   try {
     const hooks = await import(pathToFileURL(at).href);
     if (typeof hooks.person === 'function') person = hooks.person;
     if (typeof hooks.sidebar === 'function') sidebar = hooks.sidebar;
+    if (typeof hooks.handed === 'function') handed = hooks.handed;
     if (hooks.pages && typeof hooks.pages === 'object') pages = loadHostPages(hooks.pages, path.dirname(at));
   } catch (err) {
     throw new Error(`could not load ${at}: ${err.message}`);
   }
-  console.log(`  hosted by ${at}: the caller from ${CALLER_HEADER}${person ? ', the person from person()' : ''}${sidebar ? ', the sidebar from sidebar()' : ''}${pages ? `, its pages ${[...pages.paths.keys()].join(' ')}${pages.signIn ? ' and its sign-in' : ''}` : ''}`);
-  return createHost({ person, sidebar, pages }, shell);
+  console.log(`  hosted by ${at}: the caller from ${CALLER_HEADER}${person ? ', the person from person()' : ''}${sidebar ? ', the sidebar from sidebar()' : ''}${handed ? ', an answer up front from handed()' : ''}${pages ? `, its pages ${[...pages.paths.keys()].join(' ')}${pages.signIn ? ' and its sign-in' : ''}` : ''}`);
+  return createHost({ person, sidebar, pages, handed }, shell);
 }
 
-function createHost({ person, sidebar, pages }, shell) {
+function createHost({ person, sidebar, pages, handed }, shell) {
   const signsIn = Boolean(person && pages?.signIn);
 
   // The host's sidebar list → the `user.workspaces` shape the chrome already draws. Each entry: { id, name?, icon?,
@@ -167,6 +168,16 @@ function createHost({ person, sidebar, pages }, shell) {
       }
       if (!user || !sidebar) return user;
       return { ...user, workspaces: await sidebarWorkspaces(req, req.__hostPerson || { person: user.id, name: user.name ?? null }) };
+    },
+
+    /**
+     * What the host hands the page up front, for the document of a person: its handed(req, person), carried by the
+     * bootstrap as `handed`; null when it throws (the page asks as it would), and when the host exports none.
+     */
+    async handed(req) {
+      if (!handed) return null;
+      try { return (await handed(req, req.__hostPerson || null)) ?? null; }
+      catch (err) { console.error(`  ! hosted handed() threw: ${err.message}`); return null; }
     },
 
     /** ctx.caller under a host: its header (base64url JSON, set after it verified the caller), else person()'s answer. */
