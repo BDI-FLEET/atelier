@@ -141,7 +141,7 @@ if (!AUTH && !LOOPBACK_HOST) {
 }
 
 const host = HOSTED ? await loadHost(HOSTED, ROOT, {
-  mode: MODE, label: LABEL, serveIndex, serveAsset, getModules, getMetaByQId, resolveDefaultChromeQid, buildImportMap,
+  mode: MODE, label: LABEL, serveIndex, serveAsset, getModules, getMetaByQId, resolveDefaultChromeQid, buildImportMap, assetTag, addressOf,
 }).catch((err) => { console.error(`\n  hosted: ${err.message}\n`); process.exit(1); }) : null;
 
 // Hoisted up here (out of the WS section below) because module mounting
@@ -1513,7 +1513,7 @@ function buildImportMap(chromeQid) {
   if (!m) return null;
   const imports = {};
   if (fs.existsSync(path.join(m.dir, 'kit.js')) || fs.existsSync(path.join(m.dir, 'kit.jsx'))) {
-    imports['@atelier/kit'] = `/modules/${chromeQid}/kit.js`;
+    imports['@atelier/kit'] = addressOf(`/modules/${chromeQid}/kit.js`);
   }
   return Object.keys(imports).length ? { imports } : null;
 }
@@ -1548,6 +1548,7 @@ async function serveIndex(req, res) {
     chromeQid,
     defaultChromeQid,
     chromes: chromeQids(metaByQId),
+    assetTag: assetTag(),
     ...host?.bootstrap(),
     // Where each module this person sees is framed (a host's sidebar entry may carry its own `origin`, which wins).
     frames: frames.origins(user),
@@ -1572,7 +1573,7 @@ async function serveIndex(req, res) {
   if (chromeQid) {
     const chromeMod = getModules().find((x) => x.qualifiedId === chromeQid);
     if (chromeMod && fs.existsSync(path.join(chromeMod.dir, 'styles.css'))) {
-      chromeStylesTag = `<link id="atelier-chrome-styles" rel="stylesheet" href="/modules/${chromeQid}/styles.css">`;
+      chromeStylesTag = `<link id="atelier-chrome-styles" rel="stylesheet" href="${addressOf(`/modules/${chromeQid}/styles.css`)}">`;
     }
   }
 
@@ -1924,7 +1925,10 @@ function getPinnedShellJsx(src) {
 // for the process, so the bootstrap HTML can't drift from the running server.
 let _pinnedIndexHtml = null;
 function getPinnedIndexHtml() {
-  if (_pinnedIndexHtml == null) _pinnedIndexHtml = fs.readFileSync(path.join(HOST_DIR, 'index.html'), 'utf8');
+  if (_pinnedIndexHtml == null) {
+    _pinnedIndexHtml = fs.readFileSync(path.join(HOST_DIR, 'index.html'), 'utf8')
+      .replace(/ src="(\/assets\/[a-z-]+\.js)"/g, (_, p) => ` src="${addressOf(p)}"`);
+  }
   return _pinnedIndexHtml;
 }
 
@@ -1967,6 +1971,37 @@ const BUILD_FINGERPRINT = (() => {
   return h.digest('hex').slice(0, 8);
 })();
 
+// With hot reload off the files this process serves do not change while it runs (a deployed instance), so a built asset
+// is addressed by a tag of everything it can be built from — the build inputs above, the shell's own sources, every
+// module's folder and the host's pages — and kept by the browser: the document, the import map and every relative
+// import inside a built asset carry `?v=<tag>`, and an asset asked with the tag answers `immutable`. With hot reload on
+// the tag is null and nothing changes: an edit must reach the browser at once.
+const KEPT = 'public, max-age=31536000, immutable';
+let _assetTag;
+function assetTag() {
+  if (HOT_RELOAD) return null;
+  if (_assetTag === undefined) {
+    const h = crypto.createHash('sha1').update(BUILD_FINGERPRINT);
+    const add = (f) => { try { h.update(f).update(fs.readFileSync(f)); } catch {} };
+    const walk = (dir) => {
+      let entries;
+      try { entries = fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name)); } catch { return; }
+      for (const e of entries) {
+        if (e.name === 'node_modules' || e.name === 'data' || /^[._-]/.test(e.name)) continue;
+        if (e.isDirectory()) walk(path.join(dir, e.name));
+        else if (e.isFile()) add(path.join(dir, e.name));
+      }
+    };
+    for (const f of fs.readdirSync(HOST_DIR).sort()) if (/\.(jsx?|css|html)$/.test(f)) add(path.join(HOST_DIR, f));
+    for (const m of getModules()) walk(m.dir);
+    for (const dir of host?.sources?.() || []) walk(dir);
+    _assetTag = h.digest('hex').slice(0, 12);
+  }
+  return _assetTag;
+}
+/** An asset's address as the document and the import map write it: with the tag when there is one. */
+function addressOf(p) { return assetTag() == null ? p : `${p}?v=${assetTag()}`; }
+
 // gzip: text over 1 KiB — below that the framing outweighs the saving.
 const GZIP_MIN = 1024;
 const GZIP_TYPES = /^(text\/|application\/(javascript|json|xml))/;
@@ -1978,6 +2013,7 @@ async function serveAsset(req, res, url, asset = resolveAssetSource(url.pathname
     return;
   }
   try {
+    const kept = assetTag() != null && url.searchParams.get('v') === assetTag();
     const headers = {};
     let body;
     let etag = null;
@@ -2004,8 +2040,8 @@ async function serveAsset(req, res, url, asset = resolveAssetSource(url.pathname
       // client is re-importing a changed module — propagate that version onto
       // its relative imports so a multi-file module's siblings re-fetch too.
       // Cold loads carry no `?v`, so this is inert for normal serving.
-      const v = isModuleFrontend && url.searchParams.get('v');
-      body = (v && /^\d+$/.test(v)) ? versionRelativeImports(built.content, v) : built.content;
+      const v = (isModuleFrontend || kept) && url.searchParams.get('v');
+      body = (v && (kept || /^\d+$/.test(v))) ? versionRelativeImports(built.content, v) : built.content;
       etag = `"${BUILD_FINGERPRINT}-${built.mtimeMs}${v ? `-${v}` : ''}"`;
     } else if (asset.kind === 'css') {
       const built = asset.scan
@@ -2024,7 +2060,9 @@ async function serveAsset(req, res, url, asset = resolveAssetSource(url.pathname
     // load costs a 304 instead of re-downloading multi-MB dev bundles, while
     // an edited file (new mtime → new ETag) ships fresh bytes immediately —
     // hot-reload semantics untouched.
-    if (etag) {
+    if (kept) {
+      headers['Cache-Control'] = KEPT;
+    } else if (etag) {
       headers['ETag'] = etag;
       headers['Cache-Control'] = 'no-cache';
       if (req.headers['if-none-match'] === etag) {

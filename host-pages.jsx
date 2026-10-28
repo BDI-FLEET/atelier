@@ -15,13 +15,15 @@ const { useState, useEffect } = React;
 
 const hostPageCache = new Map();   // src → Promise<component>
 function loadHostPage(src) {
-  if (!hostPageCache.has(src)) hostPageCache.set(src, import(src).then((m) => {
+  if (!hostPageCache.has(src)) hostPageCache.set(src, import(addressOf(src)).then((m) => {
     if (typeof m.default !== 'function') throw new Error(`${src} has no default export`);
     return m.default;
   }));
   return hostPageCache.get(src);
 }
 const boot = () => window.__ATELIER__ || {};
+/** An asset's address as the page imports it: with the shell's asset tag when the bootstrap carries one (hot reload off: the asset keeps). */
+export const addressOf = (p) => (boot().assetTag ? `${p}?v=${boot().assetTag}` : p);
 const hostPages = () => boot().pages || [];
 /** Whether a page lives in a workspace: the ones its `workspaces` names (the global workspace, or every other one), else every one. */
 function livesIn(page, workspace) {

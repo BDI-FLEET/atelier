@@ -26,7 +26,7 @@ import { resolveModuleChrome, missingChrome } from './chrome-resolve.js';
 import { wireWsBridge } from './ws-bridge.js';
 import { ModuleFrame } from './module-frame.js';
 import { flattenUserModules } from './user-modules.js';
-import { pageEntriesOf, withPages, pageQid, hostPageFor, barePageAddress, HostPage, SignedOut } from './host-pages.js';
+import { pageEntriesOf, withPages, pageQid, hostPageFor, barePageAddress, HostPage, SignedOut, addressOf } from './host-pages.js';
 
 const { useState, useEffect, useRef } = React;
 
@@ -184,7 +184,7 @@ async function loadModuleBundle(qid, bust) {
   // query string is what makes the browser fetch + evaluate the new code
   // instead of handing back the cached module. The first (cold) load passes
   // no token — distinct from every later `?v=N`.
-  const url = `/modules/${qid}/frontend.js${bust ? `?v=${bust}` : ''}`;
+  const url = bust ? `/modules/${qid}/frontend.js?v=${bust}` : addressOf(`/modules/${qid}/frontend.js`);
   try {
     const mod = await import(url);
     const Module = typeof mod.default === 'function' ? mod.default : null;

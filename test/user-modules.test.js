@@ -19,6 +19,7 @@ globalThis.window = { __ATELIER__: {}, location: { origin: 'https://atelier.exam
 const served = async (file) => import(`data:text/javascript,${encodeURIComponent((await getJsx(path.join(ROOT, file))).content)}`)
 const { flattenUserModules } = await served('user-modules.js')
 const { ModuleFrame } = await served('module-frame.jsx')
+const { addressOf } = await served('host-pages.jsx')
 
 const buildUrl = (ws, id, rest) => `/${ws}/${id}${rest ? `/${rest}` : ''}`
 window.__ATELIER__ = {
@@ -34,6 +35,13 @@ const [notes, board] = flattenUserModules(window.__ATELIER__.user)
 test("a host's entry with an origin, listed in a company's workspace, has its qid there and its frame at the origin's global address, and an instance's own module its frame at its own qid", () => {
   assert.deepEqual([notes.qid, notes.origin, notes.frameQid], ['halden/notes', 'https://m-notes.apps.example', 'global/notes'])
   assert.deepEqual([board.qid, board.origin, board.frameQid], ['team/board', 'http://board.team.localhost:4321', 'team/board'])
+})
+
+test("the page imports an asset by the shell's tag when the bootstrap carries one, bare when it carries none", () => {
+  window.__ATELIER__.assetTag = 'abc123abc123'
+  assert.equal(addressOf('/modules/global/skin/frontend.js'), '/modules/global/skin/frontend.js?v=abc123abc123')
+  window.__ATELIER__.assetTag = null
+  assert.equal(addressOf('/_atelier/pages/agent.js'), '/_atelier/pages/agent.js')
 })
 
 test("a module's entry says whether its frontend exports a Sidebar, as the server read it from the source, and nothing else is loaded for it", () => {

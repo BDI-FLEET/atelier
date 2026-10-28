@@ -126,11 +126,11 @@ function createHost({ person, sidebar, pages }, shell) {
     const chromeQid = shell.resolveDefaultChromeQid(await shell.getMetaByQId());
     const chromeMod = chromeQid ? shell.getModules().find((x) => x.qualifiedId === chromeQid) : null;
     const importMap = shell.buildImportMap(chromeQid);
-    const bootstrap = { mode: shell.mode, label: shell.label, signedOut: true, signIn: pages.signIn, chromeQid };
+    const bootstrap = { mode: shell.mode, label: shell.label, signedOut: true, signIn: pages.signIn, chromeQid, assetTag: shell.assetTag() };
     let html = template.replace('/*__ATELIER_BOOTSTRAP__*/', `window.__ATELIER__ = ${JSON.stringify(bootstrap).replace(/</g, '\\u003c')};`);
     html = html.replace('<!--__ATELIER_IMPORTMAP__-->', importMap ? `<script type="importmap">${JSON.stringify(importMap)}</script>` : '');
     html = html.replace('<!--__ATELIER_CHROME_STYLES__-->', chromeMod && fs.existsSync(path.join(chromeMod.dir, 'styles.css'))
-      ? `<link id="atelier-chrome-styles" rel="stylesheet" href="/modules/${chromeQid}/styles.css">` : '');
+      ? `<link id="atelier-chrome-styles" rel="stylesheet" href="${shell.addressOf(`/modules/${chromeQid}/styles.css`)}">` : '');
     res.writeHead(401, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
     res.end(html);
   }
@@ -189,6 +189,9 @@ function createHost({ person, sidebar, pages }, shell) {
     bootstrap() {
       return { globalWorkspace: GLOBAL_WORKSPACE, ...(pages ? { pages: [...pages.paths].map(([p, x]) => ({ path: p, ...x })) } : {}) };
     },
+
+    /** The folders the host's assets are built from, for the shell's asset tag: its pages'. */
+    sources() { return pages ? [pages.dir] : []; },
 
     /**
      * The requests that are the host's before any session: its pages' code, the default chrome's stylesheet and kit
