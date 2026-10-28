@@ -1,0 +1,30 @@
+# Our layer on Atelier's shell (the branch `hosted`) is carried by the sandbox image, the one every computer and the
+# server's shell pod run, built by the repository sandbox-image of this owner from this branch. A push here sends that
+# repository the event atelier-pushed with the pushed commit, and its images workflow builds; without the secret the
+# job says so in its summary and sends nothing, and the build is run there by hand (gh workflow run images).
+# The secret SANDBOX_IMAGE_TOKEN: a fine-grained token whose one permission is Contents: Read and write on the
+# sandbox-image repository alone, a repository secret of this one.
+name: sandbox
+
+on:
+  push:
+    branches: [hosted]
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: send atelier-pushed to sandbox-image
+        env:
+          GH_TOKEN: ${{ secrets.SANDBOX_IMAGE_TOKEN }}
+          TO: ${{ github.repository_owner }}/sandbox-image
+        run: |
+          set -euo pipefail
+          if [ -z "$GH_TOKEN" ]; then
+            echo "This repository has no secret SANDBOX_IMAGE_TOKEN: atelier-pushed is not sent, so run $TO's images workflow by hand." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          gh api --method POST "repos/$TO/dispatches" -f event_type=atelier-pushed -f "client_payload[sha]=$GITHUB_SHA"
+          echo "Sent atelier-pushed for $GITHUB_SHA to $TO: its images workflow builds the sandbox image now." >> "$GITHUB_STEP_SUMMARY"
