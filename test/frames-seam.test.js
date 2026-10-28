@@ -9,7 +9,7 @@ const MODULES = [mod('notes'), mod('board', 'team')]
 function frames(over = {}) {
   return createFrames({
     domain: null, port: 4321, baseUrl: 'http://localhost:4321', hostDir: '.', observe: false,
-    remotes: false, bounded: () => false,
+    remotes: false, bounded: () => false, addressOf: (p) => p, assetTag: () => null,
     getModules: () => MODULES, userModuleSet: (user) => new Set(user?.qids || []),
     ...over,
   })
@@ -55,6 +55,6 @@ test("a remote module listed in a company's workspace is framed on its origin as
     await f.serve({ ...req('far.localhost:4321'), method: 'GET' }, res, new URL(`http://far.localhost:4321${p}`))
     return [res.status, /window\.__ATELIER_FRAME__ = (\{.*?\});/.exec(res.body)?.[1]]
   }
-  assert.deepEqual(await page('/global/far/n/1'), [200, JSON.stringify({ qid: 'global/far', workspace: 'global', id: 'far', parent: null, title: 'Far', observe: false })])
+  assert.deepEqual(await page('/global/far/n/1'), [200, JSON.stringify({ qid: 'global/far', workspace: 'global', id: 'far', parent: null, title: 'Far', observe: false, assetTag: null })])
   assert.deepEqual(await page('/halden/far'), [404, undefined])
 })

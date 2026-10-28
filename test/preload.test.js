@@ -1,7 +1,8 @@
 // The document names up front every module the page will import, so the browser fetches them in one wave after the
 // document instead of one import level per round trip: the shell's own imports, the chrome's bundle, and, for the host's
 // page the address names, that page's bundle and its static imports, transitively (relative ones beside it, @atelier/kit
-// through the import map), each once and only for that page; a module's address and nobody's sign-in page the same way.
+// through the import map), then every other page's the same way, so a click on a tab finds its code kept; each once, the
+// addressed page's first; a module's address preloads every page's, nobody's sign-in page its own alone.
 import { test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -31,17 +32,18 @@ before(async () => { server = await startServer(ROOT, { ATELIER_HOSTED: path.joi
 after(async () => { await server?.stop(); for (const d of [ROOT, HOST]) fs.rmSync(d, { recursive: true, force: true }) })
 const doc = async (p, cookie = 'who=alex') => (await fetch(server.base + p, { headers: { accept: 'text/html', cookie } })).text()
 
-test("the document of a host's page preloads the shell's imports, the chrome's bundle and that page's imports, transitively and once, and no other page", async () => {
+test("the document of a host's page preloads the shell's imports, the chrome's bundle, that page's imports first and every other page's, transitively and once", async () => {
   const got = preloads(await doc('/global/agent'))
   assert.deepEqual(got.slice(0, SHELL.length), SHELL)
-  assert.deepEqual(got.slice(SHELL.length), ['/_atelier/pages/agent.js', '/modules/global/skin/kit.js', '/_atelier/pages/parts.js', '/_atelier/pages/common.js'])
+  assert.deepEqual(got.slice(SHELL.length), ['/_atelier/pages/agent.js', '/modules/global/skin/kit.js', '/_atelier/pages/parts.js', '/_atelier/pages/common.js', '/_atelier/pages/home.js'])
   const home = preloads(await doc('/global/'))
-  assert.deepEqual(home.slice(SHELL.length), ['/_atelier/pages/home.js', '/_atelier/pages/parts.js', '/_atelier/pages/common.js'])
+  assert.deepEqual(home.slice(SHELL.length), ['/_atelier/pages/home.js', '/_atelier/pages/parts.js', '/_atelier/pages/common.js', '/_atelier/pages/agent.js', '/modules/global/skin/kit.js'])
 })
 
-test("a module's address and an unknown one preload the shell's and the chrome's alone", async () => {
-  assert.deepEqual(preloads(await doc('/global/plain')), SHELL)
-  assert.deepEqual(preloads(await doc('/nowhere/at/all')), SHELL)
+test("a module's address and an unknown one preload the shell's, the chrome's and every page's", async () => {
+  const pages = ['/_atelier/pages/home.js', '/_atelier/pages/parts.js', '/_atelier/pages/common.js', '/_atelier/pages/agent.js', '/modules/global/skin/kit.js']
+  assert.deepEqual(preloads(await doc('/global/plain')), [...SHELL, ...pages])
+  assert.deepEqual(preloads(await doc('/nowhere/at/all')), [...SHELL, ...pages])
 })
 
 test("nobody's document preloads the sign-in page's imports with the shell's and the chrome's", async () => {
@@ -54,7 +56,7 @@ test('with hot reload off every preloaded address carries the asset tag', async 
     const html = await (await fetch(kept.base + '/global/agent', { headers: { accept: 'text/html', cookie: 'who=alex' } })).text()
     const tag = JSON.parse(html.match(/window\.__ATELIER__ = (\{.*?\});/)[1]).assetTag
     const got = preloads(html)
-    assert.equal(got.length, SHELL.length + 4)
+    assert.equal(got.length, SHELL.length + 5)
     assert.deepEqual(got.filter((a) => !a.endsWith(`?v=${tag}`)), [])
   } finally { await kept.stop() }
 })

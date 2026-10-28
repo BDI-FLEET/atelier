@@ -1584,8 +1584,7 @@ async function serveIndex(req, res) {
   );
   html = html.replace('<!--__ATELIER_IMPORTMAP__-->', importMapTag);
   html = html.replace('<!--__ATELIER_CHROME_STYLES__-->', chromeStylesTag);
-  const page = host?.pageFor ? host.pageFor(new URL(req.url, 'http://x').pathname, user) : null;
-  html = html.replace('<!--__ATELIER_PRELOAD__-->', await preloadTags(chromeQid, page ? [page] : []));
+  html = html.replace('<!--__ATELIER_PRELOAD__-->', await preloadTags(chromeQid, host?.pagesFor ? host.pagesFor(new URL(req.url, 'http://x').pathname, user) : []));
   res.writeHead(200, {
     'Content-Type': 'text/html; charset=utf-8',
     'Cache-Control': 'no-store',
@@ -1595,7 +1594,7 @@ async function serveIndex(req, res) {
 
 // What the document names up front, for the browser to fetch in one wave instead of one import level per round trip:
 // the shell's own imports (client.js's, transitively), the chrome's bundle, and each page handed (its served address
-// and its file) with its static imports, transitively. A relative import is the file beside its importer at the
+// and its file, the one the address names first, then every other of the host's) with its static imports, transitively. A relative import is the file beside its importer at the
 // address beside its importer's (`.js` served from the `.jsx` beside it); `@atelier/kit` is the import map's bundle,
 // which has no imports of its own; any other bare import is the browser's. Each address once, in discovery order.
 const STATIC_IMPORT = /^\s*(?:import|export)\s+(?:[^'";]*?\s+from\s+)?['"]([^'"]+)['"]/gm;
@@ -2054,10 +2053,10 @@ async function serveAsset(req, res, url, asset = resolveAssetSource(url.pathname
     const headers = {};
     let body;
     let etag = null;
-    if (asset.kind === 'pinned') {                     // the frame's runtime — pinned like client.js
+    if (asset.kind === 'pinned') {                     // the frame's runtime — pinned like client.js, its imports by the tag when kept
       const built = await getPinnedShellJsx(asset.src);
       headers['Content-Type'] = built.contentType;
-      body = built.content;
+      body = kept ? versionRelativeImports(built.content, assetTag()) : built.content;
       etag = `"${built.mtimeMs}"`;
     } else if (asset.kind === 'bundle') {              // the chrome's kit, served to a frame
       const built = await getJsxBundle(asset.src, asset.root, NODE_ENV);
@@ -2186,7 +2185,7 @@ const frames = createFrames({
   remotes: Boolean(host?.sidebar),
   bounded: () => Boolean(findAuthModule() || host?.person || host?.sidebar),
   getModules, getModuleMeta, getMetaByQId, resolveChromeForQid, walkJsxFiles, userModuleSet,
-  authenticateRequest, buildDefaultUser, serveApiLane, serveAsset, resolveAssetSource,
+  authenticateRequest, buildDefaultUser, serveApiLane, serveAsset, resolveAssetSource, addressOf, assetTag,
 });
 
 // The module's API lane, `/api/<ws>/<id>/…`: the gate's two checks, then the module's process (or, for the gate's own

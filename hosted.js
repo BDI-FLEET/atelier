@@ -214,13 +214,15 @@ function createHost({ person, sidebar, pages, handed }, shell) {
     sources() { return pages ? [pages.dir] : []; },
 
     /**
-     * The page an address names for this person, as the browser will resolve it (page-at.js), as the document names it
-     * up front: its served address and its file; null for any other address.
+     * The pages the document names up front, each its served address and its file: the page the address names for this
+     * person, as the browser will resolve it (page-at.js), first, then every other page of the host's, so a tab clicked
+     * in the document finds its code kept; none without pages.
      */
-    pageFor(pathname, user) {
-      if (!pages) return null;
+    pagesFor(pathname, user) {
+      if (!pages) return [];
       const found = pageAt(pathname, { pages: pageList(), globalWorkspace: GLOBAL_WORKSPACE, workspaces: user?.workspaces || [] });
-      return found ? pageEntry(found.page.src) : null;
+      const rest = pageList().filter((p) => p !== found?.page).map((p) => pageEntry(p.src));
+      return found ? [pageEntry(found.page.src), ...rest] : rest;
     },
 
     /**

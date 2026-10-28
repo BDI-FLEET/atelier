@@ -92,6 +92,31 @@ test('a module is served on its own origin and nothing of the shell is served th
   assert.equal((await get(p, 'nothere.localhost', '/global/nothere')).status, 404)
 })
 
+test("with hot reload off a frame's document addresses its runtime and the module's code by the asset tag and names them up front, and a runtime file asked with the tag is kept with its relative imports tagged", async () => {
+  const kept = await startServer(ROOT, { ATELIER_HOT_RELOAD: 'false' })
+  try {
+    const p = kept.port
+    const tag = JSON.parse((await (await fetch(kept.base + '/')).text()).match(/window\.__ATELIER__ = (\{.*?\});/)[1]).assetTag
+    assert.match(tag, /^[0-9a-f]{12}$/)
+    const doc = (await get(p, 'plain.localhost', '/global/plain')).body
+    for (const s of ['/_frame/react.js', '/_frame/react-dom.js']) assert.ok(doc.includes(`<script src="${s}?v=${tag}"></script>`), s)
+    assert.ok(doc.includes(`<script type="module" src="/_frame/frame.js?v=${tag}"></script>`), 'the frame runs by the tag')
+    for (const s of ['/_frame/frame.js', '/_frame/ws-bridge.js', '/modules/global/plain/frontend.js']) assert.ok(doc.includes(`<link rel="modulepreload" href="${s}?v=${tag}">`), `${s} named up front`)
+    assert.equal(JSON.parse(doc.match(/window\.__ATELIER_FRAME__ = (\{.*?\});/)[1]).assetTag, tag, 'the frame knows the tag for the module code it imports')
+    const frame = await get(p, 'plain.localhost', `/_frame/frame.js?v=${tag}`)
+    assert.equal(frame.headers['cache-control'], 'public, max-age=31536000, immutable')
+    assert.ok(frame.body.includes(`./ws-bridge.js?v=${tag}`), 'the frame imports the bridge by the tag')
+    assert.equal((await get(p, 'plain.localhost', `/_frame/react.js?v=${tag}`)).headers['cache-control'], 'public, max-age=31536000, immutable')
+    assert.equal((await get(p, 'plain.localhost', '/_frame/react.js')).headers['cache-control'], 'no-cache', 'asked without the tag it is revalidated, as before')
+  } finally { await kept.stop() }
+})
+
+test('with hot reload on a frame\'s document addresses its runtime bare and names nothing up front', async () => {
+  const doc = (await get(server.port, 'plain.localhost', '/global/plain')).body
+  assert.ok(doc.includes('<script src="/_frame/react.js"></script>'))
+  assert.equal(doc.includes('modulepreload'), false)
+})
+
 test('the page and a frame each load what their script imports beside it: the one real-time channel, on their own origin', async () => {
   const p = server.port
   const importsOf = (code) => [...code.matchAll(/\bfrom\s*['"]\.\/([^'"]+)['"]/g)].map((m) => m[1])

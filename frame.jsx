@@ -118,7 +118,8 @@ class Boundary extends React.Component {
 const root = ReactDOM.createRoot(document.getElementById('root'));
 async function load(v) {
   try {
-    const mod = await import(`/modules/${F.qid}/frontend.js${v ? `?v=${v}` : ''}`);
+    // a hot-swapped version by its number; otherwise by the asset tag when the instance keeps its files (hot reload off)
+    const mod = await import(`/modules/${F.qid}/frontend.js${v ? `?v=${v}` : F.assetTag ? `?v=${F.assetTag}` : ''}`);
     const M = typeof mod.default === 'function' ? mod.default : null;
     if (!M) throw new Error('no default export');
     root.render(React.createElement(Boundary, { moduleType: M }, React.createElement(M)));

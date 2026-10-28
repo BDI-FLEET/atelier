@@ -30,7 +30,7 @@ const escHtml = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<':
 const hostnameOf = (h) => String(h || '').toLowerCase().replace(/:\d+$/, '');
 
 export function createFrames(shell) {
-  const { domain, port, baseUrl, hostDir, observe, remotes, bounded } = shell;
+  const { domain, port, baseUrl, hostDir, observe, remotes, bounded, addressOf, assetTag } = shell;
   const FRAME_SUFFIX = '.' + String(domain || 'localhost').toLowerCase();
   const frameLabel = (m) => (m.workspace === GLOBAL_WORKSPACE ? m.id : `${m.id}.${m.workspace}`).toLowerCase();
 
@@ -93,7 +93,10 @@ export function createFrames(shell) {
     const chrome = await frameChromeFor(m);
     const hasKit = chrome && (fs.existsSync(path.join(chrome.dir, 'kit.js')) || fs.existsSync(path.join(chrome.dir, 'kit.jsx')));
     const hasStyles = chrome && fs.existsSync(path.join(chrome.dir, 'styles.css'));
-    const boot = { qid: m.qualifiedId, workspace: m.workspace, id: m.id, parent, title: meta.name || m.id, observe };
+    const boot = { qid: m.qualifiedId, workspace: m.workspace, id: m.id, parent, title: meta.name || m.id, observe, assetTag: assetTag() };
+    // with the tag (hot reload off) the runtime and the module's code are kept by the browser and named up front, so a
+    // frame's first open fetches them in one wave and every later open fetches none
+    const named = assetTag() == null ? [] : ['/_frame/frame.js', '/_frame/ws-bridge.js', ...(hasKit ? ['/_frame/kit.js'] : []), ...(m.remote ? [] : [`/modules/${m.qualifiedId}/frontend.js`])];
     const html = `<!doctype html>
 <html lang="en">
 <head>
@@ -101,16 +104,16 @@ export function createFrames(shell) {
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>${escHtml(boot.title)}</title>
 <style>html{color-scheme:light dark}html,body{margin:0}</style>
-${hasStyles ? '<link id="atelier-frame-styles" rel="stylesheet" href="/_frame/styles.css">' : ''}
+${hasStyles ? `<link id="atelier-frame-styles" rel="stylesheet" href="${addressOf('/_frame/styles.css')}">` : ''}
 <style>html,html body,html.dark,html.dark body{background:transparent}</style>
-<script src="/_frame/react.js"></script>
-<script src="/_frame/react-dom.js"></script>
+<script src="${addressOf('/_frame/react.js')}"></script>
+<script src="${addressOf('/_frame/react-dom.js')}"></script>
 <script>window.__ATELIER_FRAME__ = ${JSON.stringify(boot).replace(/</g, '\\u003c')};</script>
-${hasKit ? `<script type="importmap">${JSON.stringify({ imports: { '@atelier/kit': '/_frame/kit.js' } })}</script>` : ''}
-</head>
+${hasKit ? `<script type="importmap">${JSON.stringify({ imports: { '@atelier/kit': addressOf('/_frame/kit.js') } })}</script>` : ''}
+${named.map((p) => `<link rel="modulepreload" href="${addressOf(p)}">\n`).join('')}</head>
 <body>
 <div id="root"></div>
-<script type="module" src="/_frame/frame.js"></script>
+<script type="module" src="${addressOf('/_frame/frame.js')}"></script>
 </body>
 </html>`;
     res.writeHead(200, {
