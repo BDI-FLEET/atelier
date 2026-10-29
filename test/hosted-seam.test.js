@@ -65,6 +65,21 @@ test("a page says which workspaces list it, the global one or the others, none f
   await assert.rejects(loadHost(wrong, DIR, {}), /pages: "\/plans": workspaces is 'global' or 'others'/)
 })
 
+test("a page says admins alone see it with admin: true, the bootstrap carries it on that page alone, and any other value stops the load", async () => {
+  put('w/home.jsx', 'export default () => null\n')
+  put('w/settings.jsx', 'export default () => null\n')
+  const file = put('admin.js', `export const pages = { '/': { title: 'Home', file: './w/home.jsx' }, '/settings': { title: 'Settings', file: './w/settings.jsx', workspaces: 'others', admin: true } }\n`)
+  const host = await quiet(() => loadHost(file, DIR, {}))
+  assert.deepEqual(host.bootstrap().pages, [
+    { path: '/', title: 'Home', src: '/_atelier/pages/home.js' },
+    { path: '/settings', title: 'Settings', src: '/_atelier/pages/settings.js', workspaces: 'others', admin: true },
+  ])
+  const hidden = put('admin-false.js', `export const pages = { '/settings': { title: 'Settings', file: './w/settings.jsx', admin: false } }\n`)
+  assert.deepEqual((await quiet(() => loadHost(hidden, DIR, {}))).bootstrap().pages, [{ path: '/settings', title: 'Settings', src: '/_atelier/pages/settings.js' }])
+  const wrong = put('admin-wrong.js', `export const pages = { '/settings': { title: 'Settings', file: './w/settings.jsx', admin: 'yes' } }\n`)
+  await assert.rejects(loadHost(wrong, DIR, {}), /pages: "\/settings": admin is true or false/)
+})
+
 test("the host's person() replaces the auth slot, and the caller is the host's header when it sends one, else the person", async () => {
   const file = put('person.js', `export function person(req) { return req.headers.cookie === 'alex' ? { person: 'alex', name: 'Alex' } : null }\n`)
   const host = await quiet(() => loadHost(file, DIR, {}))

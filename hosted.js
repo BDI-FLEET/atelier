@@ -14,9 +14,10 @@
  * "no host" would silently drop who the person is and where the sidebar comes from.
  *
  * The host's own pages (pages are the host's, apps are frames): `pages` maps a path to { title, file, icon?, sidebar?, primary?,
- * workspaces? } (each listed in the sidebar as an entry, in the order given, before the modules, unless sidebar: false;
+ * workspaces?, admin? } (each listed in the sidebar as an entry, in the order given, before the modules, unless sidebar: false;
  * in every workspace, or only in the global one with workspaces: 'global', or only in the others with 'others'; a page
- * lives at /<ws>/<path> in each of those workspaces, listed or not, and host-pages.jsx resolves the address), and the one
+ * lives at /<ws>/<path> in each of those workspaces, listed or not, and host-pages.jsx resolves the address; admin: true
+ * is handed to the browser with the page, for the host's pages to show it to the admins of a workspace alone), and the one
  * key `signIn` names the page shown, at whatever path was asked, when person() says nobody. A page is a React component
  * (the file's default export), written like a module frontend: JSX transformed per file, React from the page,
  * `@atelier/kit` from the chrome. It runs in the page itself, inside the chrome's content area, never in a frame. The
@@ -68,7 +69,7 @@ async function serveIdentity(req, res, url) {
   return true;
 }
 
-// → { paths: Map<path, { title, src, icon?, sidebar?, workspaces? }>, signIn: { title, src } | null, dir }
+// → { paths: Map<path, { title, src, icon?, sidebar?, workspaces?, admin? }>, signIn: { title, src } | null, dir }
 function loadHostPages(pages, base) {
   const out = { paths: new Map(), signIn: null, dir: null };
   for (const [key, def] of Object.entries(pages || {})) {
@@ -84,11 +85,12 @@ function loadHostPages(pages, base) {
     if (def.sidebar !== undefined && typeof def.sidebar !== 'boolean') throw new Error(`pages: "${key}": sidebar is true or false`);
     if (def.primary !== undefined && typeof def.primary !== 'boolean') throw new Error(`pages: "${key}": primary is true or false`);
     if (def.workspaces !== undefined && !PAGE_WORKSPACES.includes(def.workspaces)) throw new Error(`pages: "${key}": workspaces is ${PAGE_WORKSPACES.map((w) => `'${w}'`).join(' or ')}`);
+    if (def.admin !== undefined && typeof def.admin !== 'boolean') throw new Error(`pages: "${key}": admin is true or false`);
     // listed in the sidebar unless it says sidebar: false, in the workspaces it names; its icon for the chrome's rail; primary: the
     // chrome puts it before every other entry
     const page = { title: def.title, src: `/_atelier/pages/${name}.js`, ...(def.icon ? { icon: def.icon } : {}), ...(def.sidebar === false ? { sidebar: false } : {}),
       ...(def.primary === true ? { primary: true } : {}),
-      ...(def.workspaces ? { workspaces: def.workspaces } : {}) };
+      ...(def.workspaces ? { workspaces: def.workspaces } : {}), ...(def.admin === true ? { admin: true } : {}) };
     if (key === 'signIn') out.signIn = page;
     else out.paths.set(key.length > 1 ? key.replace(/\/+$/, '') : key, page);
   }
