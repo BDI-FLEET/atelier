@@ -38,6 +38,20 @@ test("a sidebar entry that names a workspace and no id declares the workspace: l
   ])
 })
 
+test("a declared workspace keeps the line it gives, a string, beside its name, and a line that is no string or one on a module's entry is dropped", async () => {
+  const file = put('lines.js', `export function sidebar() { return [
+    { workspace: 'global', name: 'Ana', line: 'Your own space' }, { workspace: 'halden', name: 'Halden', line: 7 },
+    { workspace: 'team', line: 'Company' }, { id: 'notes', line: 'A note' },
+  ] }\n`)
+  const host = await quiet(() => loadHost(file, DIR, {}))
+  const user = await host.gate({ headers: {} }, { id: 'local', workspaces: [] }, async (req, d) => d)
+  assert.deepEqual(user.workspaces, [
+    { id: 'global', name: 'Ana', line: 'Your own space', modules: [{ id: 'notes', meta: {} }] },
+    { id: 'halden', name: 'Halden', modules: [] },
+    { id: 'team', line: 'Company', modules: [] },
+  ])
+})
+
 test("an app with an origin may be listed in two workspaces, an entry in each with the origin, and the bootstrap names the global workspace its frame lives in for a host with no pages", async () => {
   const file = put('two.js', `export function sidebar() { return [
     { id: 'notes', origin: 'https://m-notes.apps.example', workspace: 'halden' }, { id: 'notes', origin: 'https://m-notes.apps.example', workspace: 'team' },
