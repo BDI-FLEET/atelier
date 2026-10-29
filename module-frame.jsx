@@ -3,7 +3,7 @@
  * The module runs in an <iframe> on its own origin (window.__ATELIER__.frames, or a host's sidebar entry), so it
  * cannot read this page, the sidebar or another frame. The bridge is postMessage with the exact origin both ways:
  *   to the frame:   init { route, href, title, theme } · route { route, href } · theme { theme } · dim { on }
- *   from the frame: ready · route { route, replace } · title { title } · key { ⌘K or Esc, pressed in the frame }
+ *   from the frame: ready · route { route, replace } · title { title } · key { ⌘K, ⌘B or Esc, pressed in the frame }
  * This page owns the history: a route from the frame becomes a pushState here; back/forward goes down as a route.
  * The chrome renders the frame where it rendered the module; nothing in the chrome changes. `buildUrl(ws, id, route)`
  * is the page's address for a module's route (client.jsx).
@@ -53,8 +53,8 @@ export function ModuleFrame({ qid, frameQid, origin, route, title, onTitle, buil
         }
       } else if (d.atelier === 'title' && typeof d.title === 'string') {
         onTitle?.(d.title.slice(0, FRAME_TITLE_CHARS));
-      } else if (d.atelier === 'key' && (d.key === 'Escape' || d.key === 'k' || d.key === 'K')) {
-        // Handed to this page as if pressed here: the chrome's ⌘K palette, a dialog's Esc.
+      } else if (d.atelier === 'key' && (d.key === 'Escape' || d.key === 'k' || d.key === 'K' || d.key === 'b' || d.key === 'B')) {
+        // Handed to this page as if pressed here: the chrome's ⌘K palette and ⌘B sidebar, a dialog's Esc.
         document.dispatchEvent(new KeyboardEvent('keydown', {
           key: d.key, metaKey: !!d.metaKey, ctrlKey: !!d.ctrlKey, shiftKey: !!d.shiftKey, altKey: !!d.altKey,
           bubbles: true, cancelable: true,

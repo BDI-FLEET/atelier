@@ -86,9 +86,9 @@ if (PARENT) {
       document.getElementById('root')?.toggleAttribute('inert', !!d.on);
     }
   });
-  // ⌘K and Esc belong to the page (the palette, a dialog). Pressed in here, they are handed over.
+  // ⌘K, ⌘B and Esc belong to the page (the palette, the sidebar, a dialog). Pressed in here, they are handed over.
   document.addEventListener('keydown', (e) => {
-    const k = (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && (e.key === 'k' || e.key === 'K');
+    const k = (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && (e.key === 'k' || e.key === 'K' || e.key === 'b' || e.key === 'B');
     if (!k && e.key !== 'Escape') return;
     if (k) e.preventDefault();
     toParent('key', { key: e.key, metaKey: e.metaKey, ctrlKey: e.ctrlKey, shiftKey: e.shiftKey, altKey: e.altKey });
