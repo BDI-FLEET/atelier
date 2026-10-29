@@ -23,17 +23,13 @@
  * `@atelier/kit` from the chrome. It runs in the page itself, inside the chrome's content area, never in a frame. The
  * files live in one folder, served at /_atelier/pages/<name>.js to anyone (the sign-in page loads before a session).
  *
- * The identity of the shell is one stylesheet, identity.css, with the fonts it names under fonts/ beside it: served here
- * at /_atelier/identity.css and /_atelier/fonts/<file> to anyone, for any host, and named by index.html right after
- * the chrome's stylesheet, so every document drawn from index.html wears it (a module's frame draws its own).
- *
  * server.js hands `loadHost` the shell's functions for the index page, assets and the chrome, and asks the host it gets
  * back for the person and the sidebar (`gate`), the caller, the answer to nobody, its pages and their requests.
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
 import { resolvePathEntry, GLOBAL_WORKSPACE } from './discovery.js';
 import { CALLER_HEADER, MODULE_ID, headerObject } from './router.js';
 import { pageAt } from './page-at.js';
@@ -45,29 +41,6 @@ const PAGE_PATH = /^\/[a-zA-Z0-9][a-zA-Z0-9_-]*(?:\/[a-zA-Z0-9][a-zA-Z0-9_-]*(?:
 const RESERVED_PREFIX = /^\/(api|assets|modules|_atelier)\//;
 // The workspaces a page may say list it: the global one alone, or every other one.
 const PAGE_WORKSPACES = [GLOBAL_WORKSPACE, 'others'];
-const SHELL_DIR = path.dirname(fileURLToPath(import.meta.url));
-const IDENTITY_PATH = '/_atelier/identity.css';
-const IDENTITY_FILE = path.join(SHELL_DIR, 'identity.css');
-const FONT_PATH = /^\/_atelier\/fonts\/([a-z0-9-]+\.woff2)$/;
-const FONTS_DIR = path.join(SHELL_DIR, 'fonts');
-// A font is kept by the browser for a year: a font's file name changes with its version.
-const FONT_KEPT = 'public, max-age=31536000, immutable';
-
-/** The identity's stylesheet, fresh on every load, and its fonts, kept; to anyone, as the sign-in page wears it. → true when answered. */
-async function serveIdentity(req, res, url) {
-  if (req.method !== 'GET' && req.method !== 'HEAD') return false;
-  const font = FONT_PATH.exec(url.pathname);
-  const file = url.pathname === IDENTITY_PATH ? IDENTITY_FILE : font ? path.join(FONTS_DIR, font[1]) : null;
-  if (!file) return false;
-  let body;
-  try { body = await fs.promises.readFile(file); } catch { res.writeHead(404); res.end('Not found'); return true; }
-  res.writeHead(200, {
-    ...(font ? { 'Content-Type': 'font/woff2', 'Cache-Control': FONT_KEPT } : { 'Content-Type': 'text/css; charset=utf-8', 'Cache-Control': 'no-store' }),
-    'Content-Length': body.length,
-  });
-  res.end(req.method === 'HEAD' ? undefined : body);
-  return true;
-}
 
 // → { paths: Map<path, { title, src, icon?, sidebar?, workspaces?, admin? }>, signIn: { title, src } | null, dir }
 function loadHostPages(pages, base) {
@@ -255,13 +228,12 @@ function createHost({ person, sidebar, pages, handed }, shell) {
     },
 
     /**
-     * The requests that are the host's before any session: the identity's stylesheet and fonts, its pages' code, the default chrome's stylesheet and kit
+     * The requests that are the host's before any session: its pages' code, the default chrome's stylesheet and kit
      * for its sign-in page (public, like the shell's own assets: the chrome is the look of the sign-in page, not a
      * tenant's module), and a page asked by nobody, which gets the sign-in page at that path rather than the gate's
      * bare 401. → true when answered.
      */
     async serve(req, res, url) {
-      if (await serveIdentity(req, res, url)) return true;
       if (!pages) return false;
       const pg = PAGE_FILE.exec(url.pathname);
       if (pg) {
