@@ -5,12 +5,13 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Atelier</title>
 
-  <!-- The shell ships zero pixels and makes zero visual assumptions. All
-       visual identity — fonts, colors, rail, topbar, banner, favicon,
-       theme-color, icon set — lives in a chrome-slot module (any global
-       module exporting `meta = { isChrome: true }`). There is no default chrome.
-       client.jsx dynamic-imports the active chrome and renders it as the root;
-       with none installed it renders a plain "add a chrome" screen.
+  <!-- The shell makes no visual assumption of its own: rail, topbar, banner,
+       favicon, theme-color and icon set live in a chrome-slot module (any
+       global module exporting `meta = { isChrome: true }`). There is no default
+       chrome. client.jsx dynamic-imports the active chrome and renders it as
+       the root; with none installed it renders a plain "add a chrome" screen.
+       Under a host, one stylesheet of the shell's own, identity.css, gives the
+       chrome its faces and colours (see "The identity" in the README).
 
        The one inline rule below is non-visual: a margin reset plus a
        color-scheme hint, so the brief pre-chrome paint follows the OS
