@@ -354,7 +354,7 @@ That's it. A module is React + Tailwind + the browser, plus thin WS + routing pr
 
 A module is read on a phone and on a wide screen, in light and in dark, beside the chrome. Six rules, each checked before a module is shown:
 
-1. **Nothing empty.** The canvas holds the content, edge to edge of its column: no empty grid cells, no placeholder tiles, no region reserved for what is not there yet. An empty list says one sentence and shows the one action that fills it; a title alone is not a page.
+1. **Nothing empty.** The frame hands the module the whole canvas, edge to edge of the chrome's panel, with no padding of the chrome around it; what you paint reaches its corners. The canvas holds the content, edge to edge of its column: no empty grid cells, no placeholder tiles, no region reserved for what is not there yet. An empty list says one sentence and shows the one action that fills it; a title alone is not a page.
 2. **The chrome's kit and tokens, never your own.** Build from `@atelier/kit` (its text, lists, buttons, inputs, dialogs) and the Tailwind classes of the mounted chrome; take colours, radii and spacing from its tokens so the module reads as part of the shell, in both themes (`dark` is toggled on the frame's `<html>`). No hand-picked hex colours, no second font, no CSS file of your own.
 3. **One type scale, one column of reading.** Headings, labels and body sizes from the kit's scale; running text at most about 65 characters wide; numbers that line up use `tabular-nums`.
 4. **One column on a phone.** Lay out with flex or grid and `gap`; rows wrap or stack under about 640px; nothing has a minimum width wider than the screen; only a table may scroll sideways, in its own container. Side padding of at least 16px at every width.

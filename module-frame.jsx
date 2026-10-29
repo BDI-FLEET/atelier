@@ -20,7 +20,7 @@ const themeNow = () => (document.documentElement.classList.contains('dark') ? 'd
 
 export function ModuleFrame({ qid, frameQid, origin, route, title, onTitle, buildUrl }) {
   const ref = useRef(null);
-  const [height, setHeight] = useState(null);
+  const [box, setBox] = useState(null);
   const [theme, setTheme] = useState(themeNow);
   const [ws, id] = qid.split('/');
   // The first address only, the frame's own on its origin; later routes travel by the bridge (a new src would reload the module).
@@ -88,18 +88,27 @@ export function ModuleFrame({ qid, frameQid, origin, route, title, onTitle, buil
     return () => mo.disconnect();
   }, [origin]);
 
-  // The frame fills the content area down to the bottom of the window; the module scrolls inside it.
+  // The frame is the whole canvas: it spans the chrome's padded panel edge to edge (the panel's padding undone by its
+  // margins, the panel's rounded corners clipping it) and reaches the bottom of the window; the module scrolls inside it.
   React.useLayoutEffect(() => {
     const measure = () => {
       const el = ref.current;
       if (!el) return;
-      let below = 0;
-      for (let n = el.parentElement; n && n !== document.body; n = n.parentElement) {
+      let panel = el.parentElement, pad = { top: 0, right: 0, bottom: 0, left: 0 };
+      for (; panel && panel !== document.body; panel = panel.parentElement) {
+        const cs = getComputedStyle(panel);
+        pad = { top: parseFloat(cs.paddingTop), right: parseFloat(cs.paddingRight), bottom: parseFloat(cs.paddingBottom), left: parseFloat(cs.paddingLeft) };
+        if (pad.top || pad.right || pad.bottom || pad.left) break;
+      }
+      const inPanel = panel && panel !== document.body;
+      let below = inPanel ? parseFloat(getComputedStyle(panel).borderBottomWidth) : 0;
+      for (let n = inPanel ? panel.parentElement : el.parentElement; n && n !== document.body; n = n.parentElement) {
         const cs = getComputedStyle(n);
         below += parseFloat(cs.paddingBottom) + parseFloat(cs.borderBottomWidth);
       }
-      const top = el.getBoundingClientRect().top + window.scrollY;
-      setHeight(Math.max(FRAME_MIN_HEIGHT, Math.floor(window.innerHeight - top - below)));
+      // where the frame's top edge lands once its margins span the panel: the panel's inner top edge
+      const top = (inPanel ? panel.getBoundingClientRect().top + parseFloat(getComputedStyle(panel).borderTopWidth) : el.getBoundingClientRect().top) + window.scrollY;
+      setBox({ pad, height: Math.max(FRAME_MIN_HEIGHT, Math.floor(window.innerHeight - top - below)) });
     };
     measure();
     window.addEventListener('resize', measure);
@@ -113,6 +122,7 @@ export function ModuleFrame({ qid, frameQid, origin, route, title, onTitle, buil
     src,
     title: title || qid,
     'data-atelier-frame': qid,
-    style: { display: 'block', width: '100%', height: height ? `${height}px` : '70vh', border: 0, background: 'transparent', colorScheme: theme },   // the frame's scheme, so its page stays see-through
+    style: { display: 'block', border: 0, background: 'transparent', colorScheme: theme,   // the frame's scheme, so its page stays see-through
+      ...(box ? { height: `${box.height}px`, width: `calc(100% + ${box.pad.left + box.pad.right}px)`, margin: `-${box.pad.top}px -${box.pad.right}px -${box.pad.bottom}px -${box.pad.left}px` } : { width: '100%', height: '70vh' }) },
   });
 }
