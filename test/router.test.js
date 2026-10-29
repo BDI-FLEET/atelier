@@ -24,15 +24,15 @@ async function viaFetch(url, headers, body) {
   return { status: r.status, body: await r.json() }
 }
 
-function viaSocket(socketPath, p, headers, body) {
+function viaSocket(socketPath, p, headers, body, method = 'POST') {
   return new Promise((resolve, reject) => {
-    const req = http.request({ socketPath, method: 'POST', path: p, headers: { ...headers, 'content-length': Buffer.byteLength(body) } }, (res) => {
+    const req = http.request({ socketPath, method, path: p, headers: { ...headers, ...(body === null ? {} : { 'content-length': Buffer.byteLength(body) }) } }, (res) => {
       let text = ''
       res.on('data', (d) => { text += d })
       res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(text) }))
     })
     req.on('error', reject)
-    req.end(body)
+    req.end(body ?? undefined)
   })
 }
 
@@ -40,7 +40,7 @@ async function moduleServe() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'atelier-router-'))
   const mod = path.join(dir, 'echo')
   fs.mkdirSync(mod)
-  fs.writeFileSync(path.join(mod, 'module.json'), JSON.stringify({ name: 'echo', agent: { tools: ['heard'] } }))
+  fs.writeFileSync(path.join(mod, 'module.json'), JSON.stringify({ name: 'echo', agent: { tools: ['heard'] }, config: ['ECHO_KEY'] }))
   // what a route and a tool read of the request: its body, ctx.caller, ctx.call and the computer's headers left on it
   fs.writeFileSync(path.join(mod, 'backend.js'), `const left = (q) => Object.keys(q.headers).filter((h) => h.startsWith('x-atelier-'))
 export default {
@@ -64,6 +64,7 @@ export default {
   })
   return {
     post: (headers, body, p = '/api/global/echo/echo') => viaSocket(socket, p, headers, body),
+    get: (p) => viaSocket(socket, p, {}, null, 'GET'),
     stop: () => { p.removeAllListeners('exit'); p.kill('SIGTERM'); fs.rmSync(dir, { recursive: true, force: true }) },
   }
 }
@@ -103,6 +104,16 @@ test("in a computer's serving sandbox a tool's run reads the call's id in ctx.ca
     assert.deepEqual([tool.status, tool.body.result], [200, { caller, call: 'tc-0123abcd' }])
     const route = await sandbox.post(computer, '{"a":1}')
     assert.deepEqual([route.status, route.body.call, route.body.left], [200, null, []])
+  } finally {
+    sandbox.stop()
+  }
+})
+
+test("what a serving sandbox offers names its tools, its teaching and the config keys module.json declares", async () => {
+  const sandbox = await moduleServe()
+  try {
+    const offered = await sandbox.get('/api/global/echo/tools')
+    assert.deepEqual([offered.status, offered.body.tools.map((t) => t.name), offered.body.teaching, offered.body.config], [200, ['heard'], null, ['ECHO_KEY']])
   } finally {
     sandbox.stop()
   }

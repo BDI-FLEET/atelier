@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { declaredMeta } from '../module-json.js'
+import { declaredMeta, readModuleJson } from '../module-json.js'
 
 const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'atelier-module-json-'))
 after(() => fs.rmSync(DIR, { recursive: true, force: true }))
@@ -25,4 +25,15 @@ test("module.json's sidebar fields come back as meta, and its problems are repor
     assert.equal(warned.length, 2)
   } finally { console.warn = warn }
   assert.deepEqual(declaredMeta(path.join(DIR, 'none'), 'global/none'), { meta: {}, mtimeMs: 0 })
+})
+
+test("module.json's config names the keys the app needs, each A-Z, digits and _; a list with a name that is none is reported and ignored", () => {
+  const dir = path.join(DIR, 'config')
+  fs.mkdirSync(dir)
+  fs.writeFileSync(path.join(dir, 'module.json'), JSON.stringify({ name: 'Notes', config: ['STRIPE_KEY', 'MAIL_HOST'] }))
+  assert.deepEqual(readModuleJson(dir).declared, { name: 'Notes', config: ['STRIPE_KEY', 'MAIL_HOST'] })
+  fs.writeFileSync(path.join(dir, 'module.json'), JSON.stringify({ name: 'Notes', config: ['STRIPE_KEY', 'stripe key'] }))
+  const read = readModuleJson(dir)
+  assert.deepEqual(read.declared, { name: 'Notes' })
+  assert.deepEqual(read.problems, ['"config" must be ["STRIPE_KEY", ...], each a key in A-Z, digits and _; ignored'])
 })

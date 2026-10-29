@@ -9,13 +9,15 @@
 //                  (lower case, digits, underscores); the backend's `tools(ctx)` export implements them; `teaching` is
 //                  a file in the module's folder (AGENT.md). A local instance reads it and does nothing with it;
 //                  module-serve.js serves the declared tools to the computer that runs the module.
+//   config         The names of the settings and secrets the app needs (["STRIPE_KEY", ...], each A-Z, digits and _).
+//                  Served with the tools; the person who looks after the app sets each value on the host's portal.
 //
 // Unknown keys are ignored and reported. A missing file is the empty declaration: the module runs on its
 // frontend's `meta` alone. A value of the wrong kind is reported and ignored, never half-applied.
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { MODULE_NAME_CHARS, TOOL_NAME_CHARS } from './limits.js';
+import { MODULE_NAME_CHARS, TOOL_NAME_CHARS, CONFIG_KEY } from './limits.js';
 
 export const MODULE_JSON = 'module.json';
 /** A tool's name, as the agent sees it: lower case, digits and underscores, up to 64. */
@@ -34,6 +36,7 @@ const KINDS = {
   agent: (v) => !!v && typeof v === 'object' && !Array.isArray(v)
     && (v.tools === undefined || (Array.isArray(v.tools) && v.tools.every((t) => typeof t === 'string' && TOOL_NAME.test(t))))
     && (v.teaching === undefined || typeof v.teaching === 'string'),
+  config: (v) => Array.isArray(v) && v.every((k) => typeof k === 'string' && CONFIG_KEY.test(k)),
 };
 const SAYS = {
   name: `a text of 1 to ${MODULE_NAME_CHARS} characters`,
@@ -43,6 +46,7 @@ const SAYS = {
   primary: 'true or false',
   release: 'one shell command',
   agent: '{ tools: ["a_tool", ...], teaching: "AGENT.md" }, each tool named in lower case, digits and underscores',
+  config: '["STRIPE_KEY", ...], each a key in A-Z, digits and _',
 };
 
 // The declaration of the module in `dir`: { declared, problems, mtimeMs }. `declared` holds only the keys above,

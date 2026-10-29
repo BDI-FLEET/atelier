@@ -74,7 +74,7 @@ export const printFrame = (f) => {
 /**
  * One op, from wherever this runs. `target`: { host, computer, module?, workspace? }; `op` the verb and its arguments;
  * `during(into)`: what goes into the op once it started, on a laptop (`into(body)` answers the computer's reply);
- * `socket`: what a sandbox hands over on the socket instead (values, prompt, into, from). Answers the exit code of the op.
+ * `socket`: what a sandbox hands over on the socket instead (prompt, into, from). Answers the exit code of the op.
  */
 export async function runOp(name, target, op, { during, socket, onFrame = printFrame, follow = false } = {}) {
   const fail = failer(name);

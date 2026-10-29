@@ -34,7 +34,8 @@
 // them): the names module.json declares, each implemented by the backend's `tools(ctx)` export
 // ({ <name>: { description, input, run(args) } }, docs/MODULES.md). A name declared and not implemented, or implemented
 // and not declared, is reported and not served. Two more paths on the socket, answered before the module's own routes:
-//   GET  /api/<ws>/<id>/tools          → { tools: [{ name, description, input }], teaching: <the page's text> | null }
+//   GET  /api/<ws>/<id>/tools          → { tools: [{ name, description, input }], teaching: <the page's text> | null,
+//                                          config: <the key names module.json declares> }
 //   POST /api/<ws>/<id>/tools/<name>   { …args } → 200 { result } · 4xx/500 { error }
 // A call is an agent's: its caller (X-Atelier-Caller, set by the computer from what the host verified) names the calling
 // sandbox, `{ persona, name, sandbox, chat }`; a caller without `sandbox` (a person's frame) is refused 403. `run` reads
@@ -226,7 +227,7 @@ async function toolRequest(req, res, p, asked) {
   const send = (data, status = 200) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(data)); };
   if (p === `${prefix}/tools`) {
     if (req.method !== 'GET') return false;
-    send({ tools: [...tools].map(([name, t]) => ({ name, description: t.description, input: t.input })), teaching });
+    send({ tools: [...tools].map(([name, t]) => ({ name, description: t.description, input: t.input })), teaching, config: declared.declared.config ?? [] });
     return true;
   }
   const name = decodeURIComponent(p.slice(`${prefix}/tools/`.length));

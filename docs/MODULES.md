@@ -43,7 +43,8 @@ The declaration every app carries; unknown keys are ignored and reported. A modu
 
 ```json
 { "name": "Reading list", "icon": "book-open", "group": "tools", "color": "teal", "primary": false,
-  "release": "node migrate.js", "agent": { "tools": ["add_item"], "teaching": "AGENT.md" } }
+  "release": "node migrate.js", "agent": { "tools": ["add_item"], "teaching": "AGENT.md" },
+  "config": ["STRIPE_KEY"] }
 ```
 
 | key | meaning |
@@ -54,6 +55,7 @@ The declaration every app carries; unknown keys are ignored and reported. A modu
 | `primary` | A request to land on this app when its place opens. |
 | `release` | One shell command the host runs at a push, before the switch. Read, not run, by a local instance. |
 | `agent` | `{ tools, teaching }`: the calls the agent gets, and one page on when to use them. `tools` names them (lower case, digits, underscores); `teaching` is a file in the module's folder. Read, not acted on, by a local instance. See *Tools: the calls an agent gets*, below. |
+| `config` | The names of the settings and secrets the app needs, `["STRIPE_KEY", ...]`, each in A-Z, digits and _. The backend reads each as an environment variable. Behind a host they are served with the tools, and the person who looks after the app sets each value on the host's portal, under the app's Settings and secrets; `atelier config set` does the same from a laptop, and is refused inside a sandbox: a value never passes through an agent. Read, not acted on, by a local instance. |
 
 `atelier start` reads it with the module's `meta`: `name`, `icon`, `group`, `color` and `primary` from `module.json` win where present, so the chrome draws them. An unknown key, or a value of the wrong kind, is ignored and reported once per edit (`! global/kb/module.json: unknown key "colour", ignored`). **Without a `module.json` a module runs on its `meta`** (below), which is all there is. A folder is a module only when it has a `frontend.jsx` or a `backend.js`.
 

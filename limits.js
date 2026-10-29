@@ -112,6 +112,8 @@ export const AGENT_NAME_CHARS = 32;
 
 /* The longest key of an app's config. */
 export const CONFIG_KEY_CHARS = 64;
+/* A config key as the manual writes them (CRM_MAIL_HOST): A-Z, digits and _, up to CONFIG_KEY_CHARS. */
+export const CONFIG_KEY = new RegExp(`^[A-Z_][A-Z0-9_]{0,${CONFIG_KEY_CHARS - 1}}$`);
 
 /* The longest value of an app's config: the computer refuses a longer one. */
 export const CONFIG_VALUE_CHARS = 4096;
