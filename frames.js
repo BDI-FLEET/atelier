@@ -95,8 +95,9 @@ export function createFrames(shell) {
     const hasStyles = chrome && fs.existsSync(path.join(chrome.dir, 'styles.css'));
     const boot = { qid: m.qualifiedId, workspace: m.workspace, id: m.id, parent, title: meta.name || m.id, observe, assetTag: assetTag() };
     // with the tag (hot reload off) the runtime and the module's code are kept by the browser and named up front, so a
-    // frame's first open fetches them in one wave and every later open fetches none
-    const named = assetTag() == null ? [] : ['/_frame/frame.js', '/_frame/ws-bridge.js', ...(hasKit ? ['/_frame/kit.js'] : []), ...(m.remote ? [] : [`/modules/${m.qualifiedId}/frontend.js`])];
+    // frame's first open fetches them in one wave and every later open fetches none; a module that runs elsewhere serves
+    // its code at the same path on its own origin, so it is named too
+    const named = assetTag() == null ? [] : ['/_frame/frame.js', '/_frame/ws-bridge.js', ...(hasKit ? ['/_frame/kit.js'] : []), `/modules/${m.qualifiedId}/frontend.js`];
     const html = `<!doctype html>
 <html lang="en">
 <head>
