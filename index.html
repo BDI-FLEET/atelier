@@ -22,8 +22,11 @@
        letting the chrome's JS IIFE inject it later) eliminates a flash of
        unstyled content before the chrome's utility classes apply. The chrome's
        IIFE checks for this id and skips a duplicate injection. Empty when no
-       chrome is installed or the active chrome has no styles.css. -->
+       chrome is installed or the active chrome has no styles.css. Right after
+       it, the identity (identity.css, served by hosted.js): the faces and
+       colours the shell wears over the chrome's. -->
   <!--__ATELIER_CHROME_STYLES__-->
+  <link id="atelier-identity-styles" rel="stylesheet" href="/_atelier/identity.css">
 
   <!-- React + ReactDOM are the only ambient runtime the shell provides —
        modules are React components sharing this one instance. Every visual

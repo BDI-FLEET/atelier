@@ -1,0 +1,90 @@
+/* The identity of the shell: its faces, its named tokens, and the chrome's zinc and lime worn as the identity.
+ * Unlayered, so it wins over the chrome's @layer theme; loaded right after the chrome's stylesheet, so it wins over the
+ * chrome's own unlayered rules on the same selectors. The fonts beside it, under fonts/, are latin subsets from Google
+ * Fonts, each family under the SIL Open Font License (fonts/OFL-*.txt). */
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url(fonts/inter-v20-latin.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Cormorant Garamond';
+  font-style: normal;
+  font-weight: 400 500;
+  font-display: swap;
+  src: url(fonts/cormorant-garamond-v21-latin.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Cormorant Garamond';
+  font-style: italic;
+  font-weight: 400 500;
+  font-display: swap;
+  src: url(fonts/cormorant-garamond-italic-v21-latin.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(fonts/jetbrains-mono-v24-latin.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+:root {
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-serif: 'Cormorant Garamond', Georgia, serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  --ink: #040b14;
+  --panel: #080b12;
+  --sheet: #0d0f17;
+  --paper: #f3ede1;
+  --muted: #aca695;
+  --caps: #928c7c;
+  --live: #e6c178;
+  --live-bright: #f1d293;
+  --line: rgba(243, 237, 225, .09);
+  --edge: rgba(230, 193, 120, .16);
+
+  --color-zinc-950: #040b14;
+  --color-zinc-900: #080b12;
+  --color-zinc-800: #0d0f17;
+  --color-zinc-700: #151823;
+  --color-zinc-600: #262a36;
+  --color-zinc-500: #5c6475;
+  --color-zinc-400: #928c7c;
+  --color-zinc-300: #aca695;
+  --color-zinc-200: #d8d2c4;
+  --color-zinc-100: #e9e4d8;
+  --color-zinc-50: #f3ede1;
+  --color-lime-400: var(--live);
+  --color-lime-500: var(--live);
+}
+
+html,
+body {
+  font-family: var(--font-sans);
+  background: var(--paper);
+  color: var(--ink);
+}
+
+html.dark,
+html.dark body {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+[data-slot='icon'].lucide { stroke: var(--color-zinc-500); }
+.dark [data-slot='icon'].lucide { stroke: var(--color-zinc-400); }
+[data-hover] [data-slot='icon'].lucide,
+[data-active] [data-slot='icon'].lucide,
+[data-current] [data-slot='icon'].lucide { stroke: var(--color-zinc-950); }

@@ -84,6 +84,15 @@ The full contract — `ctx`, the real-time WebSocket, `ctx.module(id)` slots, ho
 
 Details: [Modules](docs/MODULES.md), [settings](docs/README.md#settings).
 
+## The identity
+
+Under a host, the shell wears one identity: a midnight ground, paper text, a Garamond voice, gold for the one thing that is alive. It has one owner, `identity.css`, a stylesheet beside the shell's files that `hosted.js` serves at `/_atelier/identity.css` (to anyone, never kept) and `index.html` names right after the chrome's stylesheet, in the signed-out document and the signed-in one. Nothing of the identity is written anywhere else in the shell: it is unlayered, so it wins over the chrome's `@layer theme`, and it changes the chrome's own variables rather than its files.
+
+- **Faces.** `--font-sans` Inter, `--font-serif` Cormorant Garamond, `--font-mono` JetBrains Mono, each a `@font-face` over a woff2 file under `fonts/` (served at `/_atelier/fonts/<file>`, kept a year: a file's name carries its version), `font-display: swap`. The body is set in `--font-sans`; a page picks the serif where it wants it.
+- **Tokens.** `--ink`, `--panel`, `--sheet`, `--paper`, `--muted`, `--caps`, `--live`, `--live-bright`, `--line`, `--edge`. The pages refer to them by name; the names are a contract.
+- **The chrome's colours.** `--color-zinc-50` to `--color-zinc-950` are remapped from paper to ink, so the chrome's and the pages' zinc classes wear the identity; `--color-lime-400` and `--color-lime-500` are `--live`. White stays white. Light mode is paper with ink text, dark mode (the identity's home) midnight with paper text.
+- **The fonts.** Latin subsets fetched from Google Fonts (`fonts.googleapis.com/css2`, the files on `fonts.gstatic.com`): Inter (one variable file, 400 to 600), Cormorant Garamond (one variable file upright and one italic, 400 to 500), JetBrains Mono 400. Each family is under the SIL Open Font License, its text beside the files (`fonts/OFL-*.txt`).
+
 ## Signing in to a host
 
 The CLI can sign you in to a host — a server that runs Atelier apps for other people, each on a computer of its own — through its portal, the host's web page where a person signs in. The CLI opens the portal's /activate page in your browser with the code in the link; you approve it there, where you are signed in (or sign in first), and the waiting command finishes:
