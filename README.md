@@ -86,7 +86,7 @@ Details: [Modules](docs/MODULES.md), [settings](docs/README.md#settings).
 
 ## The identity
 
-Under a host, the shell wears one identity: a midnight ground, paper text, a Garamond voice, gold for the one thing that is alive. It has one owner, the chrome: `bdi-chrome` in the collection `BDI-FLEET/atelier-modules`, whose `styles.css` writes the faces over its own `fonts/`, the colours, and light and dark. The shell writes no face and no colour of its own.
+Under a host, the shell wears one identity: a midnight ground, paper text, a Garamond voice, gold for the one thing that is alive. It has one owner, the chrome: `bdi-chrome` in the collection `BDI-FLEET/atelier-modules`, whose `styles.css` writes the faces over its own `fonts/`, the colours, and light and dark. The shell writes no face and no colour of its own; it serves the chrome's stylesheet and, for every `url(fonts/<file>)` in it, the font: to the page at `/modules/<chrome>/fonts/<file>` (to anyone for the sign-in page), and to a module's frame at `/_frame/fonts/<file>` (kept a year: a file's name carries its version).
 
 The names the pages refer to are a contract between the pages and the chrome:
 

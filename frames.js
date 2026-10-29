@@ -8,8 +8,8 @@
  *
  * On such a host the shell serves that module and nothing of the shell: the frame document, the frame's runtime
  * (React, frame.js: the module's half of the contract), the chrome's stylesheet built over the chrome's and this
- * module's classes (no other module's), the chrome's kit, the module's own files and API, and a real-time channel
- * carrying only its own topic. Everything else answers 404.
+ * module's classes (no other module's) with the fonts it names, the chrome's kit, the module's own files and API, and a
+ * real-time channel carrying only its own topic. Everything else answers 404.
  *
  * server.js hands `createFrames` what it decides with: the settings, the host switch's two answers (whether the
  * host's sidebar names modules, whether the module boundary is in force), and its own functions for modules, the
@@ -25,6 +25,10 @@ import { HTTP_PORT } from './limits.js';
 // a loopback name counts in all three spellings too: a browser on `localhost:<port>` may embed a frame of an instance
 // whose baseUrl says `127.0.0.1:<port>`, the same page under another name.
 const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]']);
+// A font the chrome's stylesheet names, url(fonts/<file>): a woff2 file directly under the chrome's fonts/.
+export const CHROME_FONT = /^fonts\/[a-z0-9-]+\.woff2$/;
+// A font is kept by the browser for a year: a font's file name changes with its version.
+const FONT_KEPT = 'public, max-age=31536000, immutable';
 
 const escHtml = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 const hostnameOf = (h) => String(h || '').toLowerCase().replace(/:\d+$/, '');
@@ -157,6 +161,12 @@ ${named.map((p) => `<link rel="modulepreload" href="${addressOf(p)}">\n`).join('
       if (chrome && name === 'styles.css' && fs.existsSync(path.join(chrome.dir, 'styles.css'))) {
         // a remote module's files are not on this machine: its frame gets the chrome's classes only
         return serveAsset(req, res, url, { kind: 'css', src: path.join(chrome.dir, 'styles.css'), scan: [...shell.walkJsxFiles(chrome.dir), ...(m.dir ? shell.walkJsxFiles(m.dir) : [])], key: `frame:${m.qualifiedId}` });
+      }
+      if (chrome && CHROME_FONT.test(name)) {
+        let body;
+        try { body = await fs.promises.readFile(path.join(chrome.dir, name)); } catch { return notFound(); }
+        res.writeHead(200, { 'Content-Type': 'font/woff2', 'Cache-Control': FONT_KEPT, 'Content-Length': body.length });
+        return res.end(body);
       }
       if (chrome && name === 'kit.js') {
         const kit = ['kit.jsx', 'kit.js'].map((f) => path.join(chrome.dir, f)).find((f) => fs.existsSync(f));

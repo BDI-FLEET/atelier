@@ -33,6 +33,7 @@ import { pathToFileURL } from 'node:url';
 import { resolvePathEntry, GLOBAL_WORKSPACE } from './discovery.js';
 import { CALLER_HEADER, MODULE_ID, headerObject } from './router.js';
 import { pageAt } from './page-at.js';
+import { CHROME_FONT } from './frames.js';
 import { PAGE_ICON_CHARS } from './limits.js';
 
 const PAGE_ICON = new RegExp(`^[a-z0-9-]{1,${PAGE_ICON_CHARS}}$`);
@@ -228,7 +229,7 @@ function createHost({ person, sidebar, pages, handed }, shell) {
     },
 
     /**
-     * The requests that are the host's before any session: its pages' code, the default chrome's stylesheet and kit
+     * The requests that are the host's before any session: its pages' code, the default chrome's stylesheet, kit and fonts
      * for its sign-in page (public, like the shell's own assets: the chrome is the look of the sign-in page, not a
      * tenant's module), and a page asked by nobody, which gets the sign-in page at that path rather than the gate's
      * bare 401. → true when answered.
@@ -244,7 +245,8 @@ function createHost({ person, sidebar, pages, handed }, shell) {
       }
       if (pages.signIn) {
         const chromeQid = shell.resolveDefaultChromeQid(await shell.getMetaByQId());
-        if (chromeQid && (url.pathname === `/modules/${chromeQid}/styles.css` || url.pathname === `/modules/${chromeQid}/kit.js`)) {
+        const own = chromeQid && url.pathname.startsWith(`/modules/${chromeQid}/`) ? url.pathname.slice(`/modules/${chromeQid}/`.length) : null;
+        if (own === 'styles.css' || own === 'kit.js' || (own && CHROME_FONT.test(own))) {
           await shell.serveAsset(req, res, url);
           return true;
         }
