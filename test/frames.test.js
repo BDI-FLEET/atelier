@@ -7,7 +7,10 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import http from 'node:http'
+import { pathToFileURL } from 'node:url'
 import { startServer, sleep } from './helpers.js'
+import { ROOT as SHELL } from './ours.js'
+import { getJsx } from '../build.js'
 
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'atelier-frames-'))
 const put = (rel, text) => { fs.mkdirSync(path.dirname(path.join(ROOT, rel)), { recursive: true }); fs.writeFileSync(path.join(ROOT, rel), text) }
@@ -189,4 +192,60 @@ export const pages = { '/': { title: 'Home', file: './pages/home.jsx', icon: 'ho
     const who = await (await fetch(hosted.base + '/api/global/plain/who', { headers: cookie })).json()
     assert.deepEqual(who.caller, { person: 'alex', name: 'Alex' })
   } finally { await hosted.stop(); fs.rmSync(HOST, { recursive: true, force: true }) }
+})
+
+// frame.jsx as the browser gets it, run in a stand-in window opened at `address` inside a page at PAGE, on the origin of a
+// stand-in server that answers every request with `status`: in node the module's import fails as it does when refused.
+// → { went: the addresses the frame replaced itself with, drawn: what it rendered, asked: the requests it made, at: its address }
+const PAGE = 'https://atelier.example'
+let opened = 0
+async function openFrame(address, status) {
+  const asked = []
+  const standIn = http.createServer((req, res) => { asked.push({ url: req.url, cache: req.headers['cache-control'] }); res.writeHead(status); res.end('closed') })
+  await new Promise((resolve) => standIn.listen(0, '127.0.0.1', resolve))
+  let at = new URL(address, `http://127.0.0.1:${standIn.address().port}`)
+  const went = [], drawn = []
+  const nothing = () => {}
+  try {
+    globalThis.window = {
+      __ATELIER_FRAME__: { qid: 'global/plain', workspace: 'global', id: 'plain', parent: PAGE, title: 'Plain', assetTag: null },
+      parent: { postMessage: nothing },
+      location: { get href() { return at.href }, get pathname() { return at.pathname }, get search() { return at.search }, get hash() { return at.hash },
+        get protocol() { return at.protocol }, get host() { return at.host }, replace: (u) => went.push(new URL(u, at).href) },
+      history: { replaceState: (_s, _t, u) => { at = new URL(u, at) } },
+      addEventListener: nothing, dispatchEvent: nothing,
+    }
+    globalThis.document = { documentElement: { classList: { toggle: nothing }, style: {}, toggleAttribute: nothing }, getElementById: () => ({ toggleAttribute: nothing }), head: {}, addEventListener: nothing, title: 'Plain' }
+    globalThis.MutationObserver = class { observe() {} }
+    globalThis.WebSocket = class { readyState = 0 }
+    globalThis.React = { Component: class { constructor(props) { this.props = props } }, createElement: (type, props, ...kids) => ({ type, props, kids }) }
+    globalThis.ReactDOM = { createRoot: () => ({ render: (el) => drawn.push(el) }) }
+    const code = (await getJsx(path.join(SHELL, 'frame.jsx'))).content.replace(/(from\s+['"])(\.\/[^'"]+)(['"])/g, (_, a, spec, z) => a + pathToFileURL(path.join(SHELL, spec)).href + z)
+    await import(`data:text/javascript,${encodeURIComponent(`${code}\n// opened ${++opened}`)}`)
+    for (let i = 0; i < 200 && !went.length && !drawn.length; i++) await sleep(10)
+    await sleep(50)
+    return { went, drawn, asked, at: at.href }
+  } finally { standIn.closeAllConnections(); await new Promise((resolve) => standIn.close(resolve)) }
+}
+const failure = (drawn) => drawn.map((el) => el.kids?.[0]).find((t) => typeof t === 'string' && t.startsWith('global/plain · failed to load\n\n'))
+
+test("a frame whose module is refused 401 (its handle gone) asks its own page once and goes there again with the page's origin, for a new pass", async () => {
+  const { went, drawn, asked, at } = await openFrame(`/global/plain/n/1?tab=2&atelier-parent=${encodeURIComponent(PAGE)}`, 401)
+  assert.deepEqual(asked, [{ url: '/global/plain/n/1?tab=2', cache: 'no-cache' }])
+  assert.deepEqual(went, [new URL(`/global/plain/n/1?tab=2&atelier-parent=${encodeURIComponent(PAGE)}`, at).href])
+  assert.deepEqual(drawn, [])
+})
+
+test('a frame that came back from a pass and whose module is refused shows the failure, and takes no other pass', async () => {
+  const { went, drawn, asked, at } = await openFrame(`/global/plain?atelier-parent=${encodeURIComponent(PAGE)}&atelier-entered=1`, 401)
+  assert.equal(new URL(at).search, '', 'the module sees neither mark')
+  assert.deepEqual([went, asked], [[], []])
+  assert.ok(failure(drawn), 'the failure is shown')
+})
+
+test("a frame whose module fails to load for any other reason than a 401 shows today's words", async () => {
+  const { went, drawn, asked } = await openFrame(`/global/plain?atelier-parent=${encodeURIComponent(PAGE)}`, 503)
+  assert.equal(asked.length, 1)
+  assert.deepEqual(went, [])
+  assert.match(failure(drawn) ?? '', /Failed to resolve module specifier "\/modules\/global\/plain\/frontend\.js"/)
 })

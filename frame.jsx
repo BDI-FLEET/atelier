@@ -55,13 +55,17 @@ window.__atelier.useRoute = () => {
 // The page's address for this module at its current route, to copy or share.
 window.__atelier.deepLink = () => deepLink;
 
-// The address the page opened the frame with carries `atelier-parent`; the module never sees it.
-(() => {
+// The address the page opened the frame with carries `atelier-parent` (known here as PARENT), and one that came back through a
+// new pass `atelier-entered`; the module sees neither.
+const ENTERED = (() => {
   const u = new URL(window.location.href);
-  if (u.searchParams.has('atelier-parent')) {
+  const entered = u.searchParams.has('atelier-entered');
+  if (u.searchParams.has('atelier-parent') || entered) {
     u.searchParams.delete('atelier-parent');
+    u.searchParams.delete('atelier-entered');
     window.history.replaceState(null, '', u.pathname + u.search + u.hash);
   }
+  return entered;
 })();
 
 /* ---- the bridge ---- */
@@ -116,6 +120,19 @@ class Boundary extends React.Component {
 }
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
+
+// A frame whose handle on its origin is gone has its own page refused 401: it goes there again with the page's origin, so
+// the page's origin hands it a new pass and sends it back marked. Once: a frame that came back so shows its failure.
+async function passAgain() {
+  if (!PARENT || ENTERED) return false;
+  const r = await fetch(window.location.href, { cache: 'no-store' }).catch(() => null);
+  if (r?.status !== 401) return false;
+  const u = new URL(window.location.href);
+  u.searchParams.set('atelier-parent', PARENT);
+  window.location.replace(u.href);
+  return true;
+}
+
 async function load(v) {
   try {
     // a hot-swapped version by its number; otherwise by the asset tag when the instance keeps its files (hot reload off)
@@ -124,6 +141,7 @@ async function load(v) {
     if (!M) throw new Error('no default export');
     root.render(React.createElement(Boundary, { moduleType: M }, React.createElement(M)));
   } catch (err) {
+    if (await passAgain()) return;
     root.render(React.createElement('pre', { style: { margin: 0, padding: 24, whiteSpace: 'pre-wrap', font: '13px/1.6 ui-monospace, Menlo, monospace' } },
       `${F.qid} · failed to load\n\n${(err && (err.stack || err.message)) || String(err)}`));
   }
