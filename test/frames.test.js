@@ -8,6 +8,7 @@ import os from 'node:os'
 import path from 'node:path'
 import http from 'node:http'
 import { pathToFileURL } from 'node:url'
+import { registerHooks } from 'node:module'
 import { startServer, sleep } from './helpers.js'
 import { ROOT as SHELL } from './ours.js'
 import { getJsx } from '../build.js'
@@ -195,11 +196,15 @@ export const pages = { '/': { title: 'Home', file: './pages/home.jsx', icon: 'ho
 })
 
 // frame.jsx as the browser gets it, run in a stand-in window opened at `address` inside a page at PAGE, on the origin of a
-// stand-in server that answers every request with `status`: in node the module's import fails as it does when refused.
+// stand-in server that answers every request with `status`: in node the module's import fails as it does when refused. With
+// `loadsFirst` the module loads at the opening, then a save asks the frame to load it again and that import fails.
 // → { went: the addresses the frame replaced itself with, drawn: what it rendered, asked: the requests it made, at: its address }
 const PAGE = 'https://atelier.example'
 let opened = 0
-async function openFrame(address, status) {
+let moduleLoads = false
+registerHooks({ resolve: (specifier, context, next) => moduleLoads && specifier.startsWith('/modules/') && context.parentURL?.startsWith('data:')
+  ? { url: 'data:text/javascript,export default function M() { return null }', shortCircuit: true } : next(specifier, context) })
+async function openFrame(address, status, { loadsFirst = false } = {}) {
   const asked = []
   const standIn = http.createServer((req, res) => { asked.push({ url: req.url, cache: req.headers['cache-control'] }); res.writeHead(status); res.end('closed') })
   await new Promise((resolve) => standIn.listen(0, '127.0.0.1', resolve))
@@ -215,14 +220,22 @@ async function openFrame(address, status) {
       history: { replaceState: (_s, _t, u) => { at = new URL(u, at) } },
       addEventListener: nothing, dispatchEvent: nothing,
     }
-    globalThis.document = { documentElement: { classList: { toggle: nothing }, style: {}, toggleAttribute: nothing }, getElementById: () => ({ toggleAttribute: nothing }), head: {}, addEventListener: nothing, title: 'Plain' }
+    globalThis.document = { documentElement: { classList: { toggle: nothing }, style: {}, toggleAttribute: nothing }, getElementById: (id) => (id === 'root' ? { toggleAttribute: nothing } : null), head: {}, addEventListener: nothing, title: 'Plain' }
     globalThis.MutationObserver = class { observe() {} }
-    globalThis.WebSocket = class { readyState = 0 }
+    const sockets = []
+    globalThis.WebSocket = class { readyState = 0; constructor() { sockets.push(this) } }
     globalThis.React = { Component: class { constructor(props) { this.props = props } }, createElement: (type, props, ...kids) => ({ type, props, kids }) }
     globalThis.ReactDOM = { createRoot: () => ({ render: (el) => drawn.push(el) }) }
     const code = (await getJsx(path.join(SHELL, 'frame.jsx'))).content.replace(/(from\s+['"])(\.\/[^'"]+)(['"])/g, (_, a, spec, z) => a + pathToFileURL(path.join(SHELL, spec)).href + z)
+    moduleLoads = loadsFirst
     await import(`data:text/javascript,${encodeURIComponent(`${code}\n// opened ${++opened}`)}`)
-    for (let i = 0; i < 200 && !went.length && !drawn.length; i++) await sleep(10)
+    const settled = async (seen) => { for (let i = 0; i < 200 && !went.length && drawn.length === seen; i++) await sleep(10) }
+    await settled(0)
+    if (loadsFirst) {
+      moduleLoads = false
+      sockets[0].onmessage({ data: JSON.stringify({ topic: 'shell', type: 'reload', moduleId: 'global/plain' }) })
+      await settled(drawn.length)
+    }
     await sleep(50)
     return { went, drawn, asked, at: at.href }
   } finally { standIn.closeAllConnections(); await new Promise((resolve) => standIn.close(resolve)) }
@@ -248,4 +261,12 @@ test("a frame whose module fails to load for any other reason than a 401 shows t
   assert.equal(asked.length, 1)
   assert.deepEqual(went, [])
   assert.match(failure(drawn) ?? '', /Failed to resolve module specifier "\/modules\/global\/plain\/frontend\.js"/)
+})
+
+test('a frame that came back from a pass and has loaded its module since takes a new pass when a later import is refused 401', async () => {
+  const { went, drawn, asked, at } = await openFrame(`/global/plain?atelier-parent=${encodeURIComponent(PAGE)}&atelier-entered=1`, 401, { loadsFirst: true })
+  assert.equal(drawn.length, 1, 'the module was drawn once')
+  assert.equal(failure(drawn), undefined)
+  assert.deepEqual(asked, [{ url: '/global/plain', cache: 'no-cache' }])
+  assert.deepEqual(went, [new URL(`/global/plain?atelier-parent=${encodeURIComponent(PAGE)}`, at).href])
 })
