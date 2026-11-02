@@ -2,6 +2,9 @@
 // can act on: the host did not answer, answered an error, served a script the browser refused, or served something else.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import path from 'node:path'
+import { ROOT } from './ours.js'
 import { explainBundleFailure } from '../bundle-failure.js'
 
 const URL_ = '/modules/global/skin/frontend.js'
@@ -71,4 +74,10 @@ test('the address is fetched once with the page credentials and no cache', async
   const calls = []
   await explain(async (...args) => { calls.push(args); return new Response(null, { status: 200, headers: { 'content-type': 'text/javascript' } }) })
   assert.deepEqual(calls, [[URL_, { credentials: 'same-origin', cache: 'no-store' }]])
+})
+
+test('the document itself says so when the browser runs no script at all, in a noscript block a browser with JavaScript off shows', () => {
+  const block = /<noscript>([\s\S]*?)<\/noscript>/.exec(fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8'))?.[1] ?? ''
+  assert.match(block, /JavaScript/)
+  assert.match(block, /Allow scripts for this site and reload\./)
 })
