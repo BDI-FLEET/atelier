@@ -48,7 +48,7 @@ import { execFile } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { build as esbuildBuild } from 'esbuild';
 import { WebSocketServer } from 'ws';
-import { getJsx, getJsxBundle, getCss } from './build.js';
+import { getJsx, getJsxBundle, getCss, staticImports } from './build.js';
 import { resolveModuleChrome, missingChrome } from './chrome-resolve.js';
 import { declaredMeta } from './module-json.js';
 import { createFrames } from './frames.js';
@@ -1594,29 +1594,12 @@ async function serveIndex(req, res) {
 
 // What the document names up front, for the browser to fetch in one wave instead of one import level per round trip:
 // the shell's own imports (client.js's, transitively), the chrome's bundle, and each page handed (its served address
-// and its file, the one the address names first, then every other of the host's) with its static imports, transitively. A relative import is the file beside its importer at the
-// address beside its importer's (`.js` served from the `.jsx` beside it); `@atelier/kit` is the import map's bundle,
-// which has no imports of its own; any other bare import is the browser's. Each address once, in discovery order.
-const STATIC_IMPORT = /^\s*(?:import|export)\s+(?:[^'";]*?\s+from\s+)?['"]([^'"]+)['"]/gm;
+// and its file, the one the address names first, then every other of the host's) with its static imports, transitively
+// (staticImports), each address once, in discovery order; the shell's own files are read pinned.
 async function importsOf(url, file, chromeQid, seen) {
-  if (seen.has(url)) return [];
-  seen.add(url);
-  const out = [url];
-  let content;
-  try { content = (file.startsWith(HOST_DIR + path.sep) ? await getPinnedShellJsx(file) : await getJsx(file)).content; } catch { return out; }
   const kit = buildImportMap(chromeQid)?.imports['@atelier/kit']?.split('?')[0];
-  for (const [, spec] of String(content).matchAll(STATIC_IMPORT)) {
-    if (/^\.\.?\//.test(spec)) {
-      const bare = spec.split('?')[0];
-      const at = new URL(bare, `http://x${url}`).pathname, beside = path.resolve(path.dirname(file), bare);
-      const jsx = beside.replace(/\.js$/, '.jsx');
-      out.push(...await importsOf(at, beside.endsWith('.js') && fs.existsSync(jsx) ? jsx : beside, chromeQid, seen));
-    } else if (spec === '@atelier/kit' && kit && !seen.has(kit)) {
-      seen.add(kit);
-      out.push(kit);
-    }
-  }
-  return out;
+  const source = async (f) => (f.startsWith(HOST_DIR + path.sep) ? await getPinnedShellJsx(f) : await getJsx(f)).content;
+  return (await staticImports(url, file, { source, kit }, seen)).map((i) => i.url);
 }
 async function preloadTags(chromeQid, pages) {
   const seen = new Set();

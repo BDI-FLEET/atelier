@@ -73,6 +73,32 @@ export async function getJsx(srcPath) {
   return entry;
 }
 
+// A page script's static imports as the browser follows them, transitively, each address once in discovery order, the
+// script's own first, each with the file it is built from. A relative import is the file beside its importer at the
+// address beside its importer's (`.js` from the `.jsx` beside it, when there is one); `kit` is `@atelier/kit`'s address
+// in the import map, which has no imports of its own; any other bare import is the browser's. `source` gives a file as
+// the browser gets it.
+const STATIC_IMPORT = /^\s*(?:import|export)\s+(?:[^'";]*?\s+from\s+)?['"]([^'"]+)['"]/gm;
+export async function staticImports(url, file, { source = async (f) => (await getJsx(f)).content, kit } = {}, seen = new Set()) {
+  if (seen.has(url)) return [];
+  seen.add(url);
+  const out = [{ url, file }];
+  let content;
+  try { content = await source(file); } catch { return out; }
+  for (const [, spec] of String(content).matchAll(STATIC_IMPORT)) {
+    if (/^\.\.?\//.test(spec)) {
+      const bare = spec.split('?')[0];
+      const at = new URL(bare, `http://x${url}`).pathname, beside = path.resolve(path.dirname(file), bare);
+      const jsx = beside.replace(/\.js$/, '.jsx');
+      out.push(...await staticImports(at, beside.endsWith('.js') && fs.existsSync(jsx) ? jsx : beside, { source, kit }, seen));
+    } else if (spec === '@atelier/kit' && kit && !seen.has(kit)) {
+      seen.add(kit);
+      out.push({ url: kit });
+    }
+  }
+  return out;
+}
+
 // Recursive max-mtime over a directory tree. Skips node_modules / dotfiles
 // / data/ so npm-install timestamps don't dominate the result. Used for
 // cache-busting bundled chromes whose source spans many files.
