@@ -57,6 +57,7 @@
     "build.js",
     "discovery.js",
     "chrome-resolve.js",
+    "bundle-failure.js",
     "client.jsx",
     "module-frame.jsx",
     "user-modules.js",

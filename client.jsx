@@ -27,6 +27,7 @@ import { wireWsBridge } from './ws-bridge.js';
 import { ModuleFrame } from './module-frame.js';
 import { flattenUserModules } from './user-modules.js';
 import { pageEntriesOf, withPages, pageQid, hostPageFor, barePageAddress, HostPage, SignedOut, addressOf } from './host-pages.js';
+import { explainBundleFailure } from './bundle-failure.js';
 
 const { useState, useEffect, useRef } = React;
 
@@ -198,7 +199,7 @@ async function loadModuleBundle(qid, bust) {
     };
   } catch (err) {
     console.error(`[atelier] failed to load bundle '${qid}':`, err);
-    return { status: 'error', err };
+    return { status: 'error', err, url };
   }
 }
 
@@ -244,9 +245,15 @@ function Takeover() {
         if (!C) setState({ kind: 'error', message: 'auth module has no default export' });
         else setState({ kind: 'ok', Component: C });
       })
-      .catch((err) => setState({ kind: 'error', message: String(err?.message || err) }));
+      .catch((err) => setState({ kind: 'importFailed', url: bundle, err }));
   }, []);
   if (state.kind === 'loading') return null;
+  if (state.kind === 'importFailed') {
+    return React.createElement(BundleFailure, {
+      url: state.url, err: state.err, what: 'sign-in module',
+      first: 'atelier: takeover failed\n' + String(state.err?.message || state.err),
+    });
+  }
   if (state.kind === 'error') {
     return React.createElement('pre',
       { style: { padding: 24, colorScheme: 'light dark', fontFamily: 'ui-monospace, monospace' } },
@@ -261,18 +268,34 @@ function Takeover() {
  * paints zero styled pixels — these are deliberately ugly so misconfigured
  * chromes are loud.
  * ========================================================================= */
-function ChromeMissingFallback({ qid, err }) {
+const FALLBACK_STYLE = { padding: 24, margin: 0, minHeight: '100vh', colorScheme: 'light dark', fontFamily: 'ui-monospace, monospace', fontSize: 13, lineHeight: 1.5, whiteSpace: 'pre-wrap' };
+
+// An import of `url` that threw: the browser's own line first, then why (bundle-failure.js) once the host was asked.
+function BundleFailure({ url, err, what, first }) {
+  const [words, setWords] = useState(first);
+  useEffect(() => {
+    let cancelled = false;
+    explainBundleFailure(url, err, { host: window.location.host, what })
+      .then(({ words: why }) => { if (!cancelled) setWords(why); });
+    return () => { cancelled = true; };
+  }, [url]);
+  return React.createElement('div', { style: FALLBACK_STYLE },
+    React.createElement('pre', { style: { margin: 0, font: 'inherit', whiteSpace: 'pre-wrap' } }, words),
+    React.createElement('button', { type: 'button', style: { marginTop: 16 }, onClick: () => window.location.reload() }, 'Reload'));
+}
+
+function ChromeMissingFallback({ qid, err, url }) {
+  const first = err && `atelier — chrome '${qid}' failed to load.\n\n${String(err?.stack || err?.message || err)}`;
+  if (url) return React.createElement(BundleFailure, { url, err, what: 'chrome', first });
   const body = err
-    ? `atelier — chrome '${qid}' failed to load.\n\n${String(err?.stack || err?.message || err)}`
+    ? first
     : `atelier — no chrome installed.\n\n`
       + `The shell ships no theme. Add a chrome module: a folder with a\n`
       + `frontend.jsx exporting\n\n`
       + `    export const meta = { isChrome: true, hidden: true }\n`
       + `    export function chrome(props) { /* render the shell UI */ }\n\n`
       + `Discover it as a global module, or name it in atelier.config.json.`;
-  return React.createElement('pre',
-    { style: { padding: 24, margin: 0, minHeight: '100vh', colorScheme: 'light dark', fontFamily: 'ui-monospace, monospace', fontSize: 13, lineHeight: 1.5, whiteSpace: 'pre-wrap' } },
-    body);
+  return React.createElement('pre', { style: FALLBACK_STYLE }, body);
 }
 
 /* =========================================================================
@@ -597,6 +620,7 @@ function App() {
     return React.createElement(ChromeMissingFallback, {
       qid: chromeQid,
       err: chromeEntry.err || new Error(`module exports no \`chrome\` function`),
+      url: chromeEntry.status === 'error' ? chromeEntry.url : null,
     });
   }
   const Chrome = chromeEntry.chrome;
