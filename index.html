@@ -54,11 +54,15 @@
   <!--__ATELIER_PRELOAD__-->
 </head>
 <body>
-  <div id="root">
-    <noscript><pre style="padding:24px;margin:0;font-family:ui-monospace,monospace;font-size:13px;line-height:1.5;white-space:pre-wrap">Atelier runs on JavaScript, and your browser has it switched off for this site.
+  <div id="root"></div>
 
-Allow scripts for this site and reload.</pre></noscript>
-  </div>
+  <!-- Shown only when no script of the page runs: client.js removes it as its first act. A browser with JavaScript
+       switched off for the site (Brave's Block scripts on iOS) renders no noscript block, so the words are plain
+       markup, kept invisible for a moment so a normal load never flashes them. -->
+  <pre id="atelier-without-scripts" style="--after:3s;animation:atelier-without-scripts 0s var(--after) both;padding:24px;margin:0;font-family:ui-monospace,monospace;font-size:13px;line-height:1.5;white-space:pre-wrap">Atelier runs on JavaScript, and your browser has it switched off for this site.
+
+Allow scripts for this site and reload.</pre>
+  <style>@keyframes atelier-without-scripts{from{visibility:hidden}to{visibility:visible}}</style>
 
   <!-- Shell — an ES module served at /assets/client.js. Wires the shared
        WebSocket bridge (window.__atelier.subscribe), URL routing,

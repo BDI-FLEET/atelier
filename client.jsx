@@ -29,6 +29,9 @@ import { flattenUserModules } from './user-modules.js';
 import { pageEntriesOf, withPages, pageQid, hostPageFor, barePageAddress, HostPage, SignedOut, addressOf } from './host-pages.js';
 import { explainBundleFailure } from './bundle-failure.js';
 
+// The page's words for a browser that runs no script go as soon as one does.
+document.getElementById('atelier-without-scripts')?.remove();
+
 const { useState, useEffect, useRef } = React;
 
 // What a chrome's `loadedModules` reads: modules run in their frames, so the page loads no module bundle, and a module's

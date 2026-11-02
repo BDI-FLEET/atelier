@@ -76,8 +76,11 @@ test('the address is fetched once with the page credentials and no cache', async
   assert.deepEqual(calls, [[URL_, { credentials: 'same-origin', cache: 'no-store' }]])
 })
 
-test('the document itself says so when the browser runs no script at all, in a noscript block a browser with JavaScript off shows', () => {
-  const block = /<noscript>([\s\S]*?)<\/noscript>/.exec(fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8'))?.[1] ?? ''
-  assert.match(block, /JavaScript/)
-  assert.match(block, /Allow scripts for this site and reload\./)
+test('the document carries the words for a browser that runs no script as plain markup the page script removes first thing, not a noscript block, which a browser with scripts switched off may never show', () => {
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8')
+  assert.doesNotMatch(html, /<noscript>/)
+  const words = /<pre id="atelier-without-scripts"[^>]*>([\s\S]*?)<\/pre>/.exec(html)?.[1] ?? ''
+  assert.match(words, /JavaScript/)
+  assert.match(words, /Allow scripts for this site and reload\./)
+  assert.match(fs.readFileSync(path.join(ROOT, 'client.jsx'), 'utf8'), /^document\.getElementById\('atelier-without-scripts'\)\?\.remove\(\);$/m)
 })
