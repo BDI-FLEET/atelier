@@ -266,7 +266,7 @@ When `hotReload` is on (the default), editing a **`.js`** file under `<module>/`
 - **Bundles** the module with esbuild (`packages: 'external'`, first-party transitive imports baked in, `import.meta.url` preserved) and loads it in a **new process** via a base64 `data:` URL.
 - If the load throws, the shell keeps the old process running and logs `reload failed, keeping current version` — and, exactly like an initial load failure, surfaces it **loudly**: the module's `/api/<ws>/<id>/*` returns a `500` carrying the error + fix and a dev error overlay shows it, clearing automatically once a clean reload succeeds (see [Error handling](#error-handling--module-failures-are-isolated)). If it loads cleanly, the old process tears down and exits, then the new one mounts (`↻ reloaded <qualifiedId> backend · pid N`).
 
-Editing the **shell** itself (`server.js`, `build.js`, `discovery.js`, `client.jsx`, `chrome-resolve.js`, `frame.jsx`, `module-frame.jsx`, `frames.js`, `hosted.js`, `host-pages.jsx`, `backend-procs.js`, `backend-host.js`, `module-json.js`, `router.js`, `ws-bridge.js`, `limits.js`) still needs a manual restart. Set `hotReload: false` (or `ATELIER_HOT_RELOAD=0`) to disable all watchers + backend hot-swap in a deployed instance.
+Editing the **shell** itself (`server.js`, `build.js`, `discovery.js`, `client.jsx`, `chrome-resolve.js`, `bundle-failure.js`, `frame.jsx`, `module-frame.jsx`, `frames.js`, `hosted.js`, `host-pages.jsx`, `backend-procs.js`, `backend-host.js`, `module-json.js`, `router.js`, `ws-bridge.js`, `limits.js`) still needs a manual restart. Set `hotReload: false` (or `ATELIER_HOT_RELOAD=0`) to disable all watchers + backend hot-swap in a deployed instance.
 
 **State resets automatically** — a save is a fresh process, so module-level variables and `ctx.module` slots start empty. **Side effects still want a teardown** — a listening sidecar port, `spawn`ed children: return a cleanup function from `mountRoutes`; it runs before the process exits (on a save, on shutdown):
 
@@ -541,6 +541,8 @@ The shell calls `chrome(props)` with:
 | `pickWorkspace(wsId)` | switch workspace |
 
 The chrome renders `active.element` as the page body and draws the rail/nav from `modules` + `workspaces`. It owns everything visual; the shell hands it state and waits.
+
+**When the chrome does not load**, the browser's own error says the same thing whatever happened (`Importing a module script failed.`), so the shell fetches the chrome's address once more and says why in plain words, with a Reload button: the host did not answer (check the connection), answered an error status (401/403: sign in again, 404: this chrome is not installed, 5xx: try again in a minute), answered something that is not a script (a proxy or a sign-in page in the way), or served the script and the browser refused to run it. That last one is the usual cause: a script blocker is on for the site (Brave's Block scripts, NoScript or a similar extension), and the page names the site's host to allow scripts for. The browser's own line stays as the last line. The sign-in takeover says the same when the auth module's bundle does not load. The words live in `bundle-failure.js`.
 
 ### A chrome can bring real dependencies
 
