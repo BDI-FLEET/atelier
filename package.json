@@ -62,6 +62,7 @@
     "module-frame.jsx",
     "user-modules.js",
     "host-pages.jsx",
+    "page-at.js",
     "index.html",
     "shims",
     "docs"
