@@ -12,17 +12,16 @@
  */
 
 import { pageAt, livesIn as lives } from './page-at.js';
+import { pageLoader, pageDrawn } from './page-drawn.js';
 
-const { useState, useEffect } = React;
+const { useState, useEffect, useRef } = React;
 
-const hostPageCache = new Map();   // src → Promise<component>
-function loadHostPage(src) {
-  if (!hostPageCache.has(src)) hostPageCache.set(src, import(addressOf(src)).then((m) => {
-    if (typeof m.default !== 'function') throw new Error(`${src} has no default export`);
-    return m.default;
-  }));
-  return hostPageCache.get(src);
-}
+const hostPageCode = pageLoader((src) => import(addressOf(src)).then((m) => {
+  if (typeof m.default !== 'function') throw new Error(`${src} has no default export`);
+  return m.default;
+}));
+/** A host page's code, imported once: resolves when it has loaded or was refused; from then on the page draws in the render that asks for it. */
+export const loadHostPage = (src) => hostPageCode.load(src);
 const boot = () => window.__ATELIER__ || {};
 /** An asset's address as the page imports it: with the shell's asset tag when the bootstrap carries one (hot reload off: the asset keeps). */
 export const addressOf = (p) => (boot().assetTag ? `${p}?v=${boot().assetTag}` : p);
@@ -57,17 +56,25 @@ export function barePageAddress(pathname) {
   const path = pathname.replace(/\/+$/, '');
   return path && hostPages().some((p) => p.path === path) ? `/${encodeURIComponent(boot().globalWorkspace)}${path}` : null;
 }
-export function HostPage({ page, props }) {
-  const [state, setState] = useState({ kind: 'loading' });
+/**
+ * The host's page `page` drawn with `props`, as one page in the content area for as long as the shell shows host pages:
+ * keyed by `qid`, so each page in each workspace is its own; while a page's code is on its way, the page drawn before stays.
+ */
+export function HostPage({ page, qid, props }) {
+  const [, settledNow] = useState(0);
+  const before = useRef(null);
+  const settled = hostPageCode.settled(page.src);
   useEffect(() => {
+    if (settled) return;
     let live = true;
-    setState({ kind: 'loading' });
-    loadHostPage(page.src).then((C) => { if (live) setState({ kind: 'ok', C }); }, (err) => { if (live) setState({ kind: 'error', err }); });
+    loadHostPage(page.src).then(() => { if (live) settledNow((n) => n + 1); });
     return () => { live = false; };
   }, [page.src]);
-  if (state.kind === 'loading') return null;
-  if (state.kind === 'error') return React.createElement('pre', { style: { whiteSpace: 'pre-wrap' } }, `${page.path || 'page'} · failed to load\n${state.err?.message || state.err}`);
-  return React.createElement(state.C, props);
+  const drawn = pageDrawn({ path: page.path, key: qid, props }, settled, before.current);
+  useEffect(() => { before.current = drawn; });
+  if (!drawn) return null;
+  if (drawn.C) return React.createElement(drawn.C, { key: drawn.key, ...drawn.props });
+  return React.createElement('pre', { key: drawn.key, style: { whiteSpace: 'pre-wrap' } }, `${drawn.path || 'page'} · failed to load\n${drawn.failed?.message || drawn.failed}`);
 }
 
 /** Nobody signed in, hosted: the host's sign-in page in the chrome's AuthLayout (from its kit), at the asked path. */

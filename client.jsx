@@ -426,6 +426,7 @@ function App() {
   // workspace — its `meta.primary` module if any, else its home.
   // A host page at this address, { page, workspace }: the host's own, shown in the content area; the URL stays as it is.
   const hostPage = hostPageFor(window.location.pathname);
+  const hostPageQid = hostPage && pageQid(hostPage.workspace, hostPage.page.path);
   useEffect(() => {
     if (hostPage || urlState.ws || !defaultWs) return;
     const primary = allModules.find((m) => m.workspace === defaultWs && m.meta?.primary)
@@ -637,7 +638,7 @@ function App() {
       kind: 'ready',
       qid: null,
       title: hostPage.page.title,
-      element: React.createElement(HostPage, { key: pageQid(hostPage.workspace, hostPage.page.path), page: hostPage.page,
+      element: React.createElement(HostPage, { page: hostPage.page, qid: hostPageQid,
         props: { user, path: hostPage.page.path, workspace: hostPage.workspace, navigate: navigateTo } }),
     };
   } else if (!activeMod) {
@@ -682,7 +683,7 @@ function App() {
         modules: [...pageList, ...allModules],
         workspaces: shownWorkspaces,
         workspace: effectiveWorkspace || '',
-        activeQid: hostPage && !activeMod ? pageQid(hostPage.workspace, hostPage.page.path) : activeQid,
+        activeQid: hostPage && !activeMod ? hostPageQid : activeQid,
         active,
         loadedModules: NO_MODULE_BUNDLES,
         navigate: navigateByQid,

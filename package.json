@@ -63,6 +63,7 @@
     "user-modules.js",
     "host-pages.jsx",
     "page-at.js",
+    "page-drawn.js",
     "index.html",
     "shims",
     "docs"

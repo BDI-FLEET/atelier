@@ -25,7 +25,7 @@ host('pages/signin.jsx', `import { word } from './common.js'\nexport default fun
 host('host.js', `export function person(req) { return /who=alex/.test(req.headers.cookie || '') ? { person: 'alex', name: 'Alex' } : null }
 export const pages = { '/': { title: 'Home', file: './pages/home.jsx', icon: 'house' }, '/agent': { title: 'Agent', file: './pages/agent.jsx', sidebar: false }, signIn: { title: 'Sign in', file: './pages/signin.jsx' } }\n`)
 
-const SHELL = ['/assets/chrome-resolve.js', '/assets/ws-bridge.js', '/assets/module-frame.js', '/assets/user-modules.js', '/assets/host-pages.js', '/assets/page-at.js', '/assets/bundle-failure.js', '/modules/global/skin/frontend.js']
+const SHELL = ['/assets/chrome-resolve.js', '/assets/ws-bridge.js', '/assets/module-frame.js', '/assets/user-modules.js', '/assets/host-pages.js', '/assets/page-at.js', '/assets/page-drawn.js', '/assets/bundle-failure.js', '/modules/global/skin/frontend.js']
 const preloads = (html) => [...html.matchAll(/<link rel="modulepreload" href="([^"]+)">/g)].map((m) => m[1])
 let server
 before(async () => { server = await startServer(ROOT, { ATELIER_HOSTED: path.join(HOST, 'host.js') }) })
