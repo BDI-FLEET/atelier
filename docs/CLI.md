@@ -109,7 +109,8 @@ app), the host checks the grant and sends the op to that computer, and what the 
   same answer for an app that is not yours and one that is not there. `400 { error }` written wrongly, `401` not signed in.
 - `GET /api/ops/<op>/stream` → JSON lines: `{ started }` once the computer took it, then `{ line }` (the computer's own
   words: printed `remote: …` on stderr), `{ out }` (output as it came: a run's, the log's, a listing; printed as it is on
-  stdout), and `{ done, code }` at the end; `{ closed }` when the computer went quiet. Closing the stream stops a
+  stdout), `{ alive }` now and then while nothing happens (nothing to do with it: it keeps the answer awake through a
+  proxy), and `{ done, code }` at the end; `{ closed }` when the computer went quiet. Closing the stream stops a
   followed log or a run.
 - `POST /api/ops/<op>/in` → the computer's answer, after `{ started }`: a run's input `{ keys }` and `{ eof }` (with
   `tty`: `{ size: { cols, rows } }` first, before anything draws, and again on a resize; `{ keys }` raw, as typed; its
