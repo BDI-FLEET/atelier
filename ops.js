@@ -132,12 +132,14 @@ export const machineName = () => (process.env.ATELIER_MACHINE || os.hostname() |
 export const shaOf = (f) => new Promise((ok, no) => { const h = crypto.createHash('sha256'); fs.createReadStream(f).on('data', (d) => h.update(d)).on('error', no).on('end', () => ok(h.digest('hex'))); });
 
 /* A file's bytes from `from` up to `size` into an op as `put` pieces of at most PIECE, each read from the file's
- * descriptor when it goes; the computer answers where the next one starts. → how many bytes it took. */
-export async function putPieces(into, put, file, { from = 0, size }) {
+ * descriptor when it goes; the computer answers where the next one starts. No piece goes once `signal` is aborted: its
+ * reason is the error. → how many bytes it took. */
+export async function putPieces(into, put, file, { from = 0, size, signal }) {
   const fd = fs.openSync(file, 'r');
   let took = 0;
   try {
     for (let at = Math.min(from, size); at < size;) {
+      signal?.throwIfAborted();
       const buf = Buffer.alloc(Math.min(PIECE, size - at));
       fs.readSync(fd, buf, 0, buf.length, at);
       const p = await into({ put, at, data: buf.toString('base64') });

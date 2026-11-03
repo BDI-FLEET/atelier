@@ -15,8 +15,9 @@
  * computer, pull files read.
  * push: every file hashed here (sha256), the list sent, the computer answers
  * which contents it lacks and how much of each it holds already from an earlier
- * try; those go in 256 KB pieces named by their hash, then each is put in
- * place. pull: the computer's list, every file that differs here comes down in
+ * try; those go in 256 KB pieces named by their hash, several files at once
+ * (FILES_IN_FLIGHT) and each file's pieces in order, then each is put in place;
+ * the first refusal stops the push and is its error. pull: the computer's list, every file that differs here comes down in
  * pieces into `<file>.atelier-part`, kept across an interruption and checked by
  * its hash before it takes the file's place.
  * sync --up is a push, --down a pull. --both: a file on one side only goes to
@@ -29,7 +30,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { failer, runOp, exitOf, inSandbox, sizeWords, shaOf, putPieces } from './ops.js';
-import { FILES_PER_ASK, FILE_TRIES, MISSING_NAMED } from './limits.js';
+import { FILES_PER_ASK, FILES_IN_FLIGHT, FILE_TRIES, MISSING_NAMED } from './limits.js';
 import { resolveHost } from './session.js';
 import { readArgs, helpOf, HOST } from './args.js';
 
@@ -88,6 +89,20 @@ async function localFiles(root) {
   return out;
 }
 
+/* `fn(item, signal)` over the items, up to `n` at a time. The first failure aborts `signal` and starts no more; once
+ * those in flight have settled, it is the error. */
+async function inFlight(items, n, fn) {
+  const stop = new AbortController();
+  let next = 0;
+  const one = async () => {
+    while (!stop.signal.aborted && next < items.length) {
+      try { await fn(items[next++], stop.signal); } catch (e) { if (!stop.signal.aborted) stop.abort(e); }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, one));
+  if (stop.signal.aborted) throw stop.signal.reason;
+}
+
 /* One push op: these local files to the drive's folder; only the contents it lacks travel. */
 async function push(list, label = 'files') {
   const total = list.reduce((n, f) => n + f.size, 0);
@@ -103,7 +118,10 @@ async function push(list, label = 'files') {
       const todo = [...need].map(([sha, from]) => ({ sha, from, f: list.find((x) => x.sha256 === sha) }));
       const toSend = todo.reduce((n, x) => n + x.f.size - Math.min(x.from, x.f.size), 0);
       console.error(`comparing … ${list.length} ${list.length === 1 ? label.replace(/s$/, '') : label}, ${sizeWords(toSend)} to send`);
-      for (const x of todo) sent += await putPieces(into, x.sha, x.f.abs, { from: x.from, size: x.f.size });
+      await inFlight(todo, FILES_IN_FLIGHT, async (x, signal) => {
+        const took = await putPieces(into, x.sha, x.f.abs, { from: x.from, size: x.f.size, signal });
+        sent += took;
+      });
       const placing = list.filter((f) => need.has(f.sha256));
       for (let i = 0; i < placing.length; i += FILES_PER_ASK) {
         const p = await into({ place: placing.slice(i, i + FILES_PER_ASK).map(({ path, size, sha256 }) => ({ path, size, sha256 })) });

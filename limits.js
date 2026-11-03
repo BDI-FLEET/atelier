@@ -8,6 +8,9 @@ export const DEV_HOST_PORT = 4350;
 /* How many bytes go in one piece when data or files move between here and a computer: 256 KiB, in base64 well under the 1 MiB one request into an op carries. */
 export const PIECE = 256 * 1024;
 
+/* How many files a push sends at once: their pieces are round trips, and a computer takes a put per file in any order. */
+export const FILES_IN_FLIGHT = 8;
+
 /* How many files one ask names when files compares or places them: 500 entries stay well under one request into an op. */
 export const FILES_PER_ASK = 500;
 
