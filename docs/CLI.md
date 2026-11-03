@@ -121,7 +121,9 @@ app), the host checks the grant and sends the op to that computer, and what the 
   `{ need: [{ sha256, from }] }` (what the drive lacks, and how much of each it holds from an earlier try),
   `{ put: <sha256>, at, data }` → `{ at }`, `{ place: [{ path, size, sha256 }] }`, `{ end }`; files pull
   `{ list, after? }` → `{ files: [{ path, size, sha256, mtime }], more }`, `{ get: <path>, at }` → `{ data, at, size }`,
-  `{ end }`. Up to 1 MB a call.
+  `{ end }`. Up to 1 MB a call. A files push or pull keeps several files in flight (`FILES_IN_FLIGHT`, limits.js): their
+  puts or gets go at once, each file's own one after the other, the next asked once the one before it was answered; the
+  first refusal starts no more, and once those in flight are answered it is the verb's error (no `{ place }`, no `{ end }`).
 
 **Inside a sandbox** (`ATELIER_SOCKET`, `ATELIER_SANDBOX`), no session: after the hello, one socket request
 `op { computer?, module?, workspace?, op, values?, prompt?, into?, from? }`; the computer asks the host on the sandbox's

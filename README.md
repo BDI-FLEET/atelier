@@ -235,7 +235,7 @@ Inside a workspace one may sit in (the same right as `attach`), `atelier agent [
 
 ## Files
 
-`atelier files push <folder> <computer>:/<path>` copies a folder to a computer's drive, `files pull <computer>:/<path> <folder>` back; only what differs moves, and an interrupted copy picks up where it stopped. `files sync <folder> <computer>:/<path> --up | --down | --both` keeps them in step; with `--both` a file changed on both sides keeps the newer one and the other beside it, `notes (agent, 7 Oct 08.31).md`. Push needs files write on that computer, pull files read. Nothing is deleted on either side; there is no `--watch` (run sync from a timer).
+`atelier files push <folder> <computer>:/<path>` copies a folder to a computer's drive, `files pull <computer>:/<path> <folder>` back; only what differs moves, several files at once (each file's pieces in order), and an interrupted copy picks up where it stopped; the first refusal stops the copy and is its error. `files sync <folder> <computer>:/<path> --up | --down | --both` keeps them in step; with `--both` a file changed on both sides keeps the newer one and the other beside it, `notes (agent, 7 Oct 08.31).md`. Push needs files write on that computer, pull files read. Nothing is deleted on either side; there is no `--watch` (run sync from a timer).
 
 ```
 $ atelier files push ./research alex:/research
