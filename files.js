@@ -15,11 +15,12 @@
  * computer, pull files read.
  * push: every file hashed here (sha256), the list sent, the computer answers
  * which contents it lacks and how much of each it holds already from an earlier
- * try; those go in 256 KB pieces named by their hash, several files at once
- * (FILES_IN_FLIGHT) and each file's pieces in order, then each is put in place;
- * the first refusal stops the push and is its error. pull: the computer's list, every file that differs here comes down in
+ * try; those go in 256 KB pieces named by their hash, then each is put in
+ * place. pull: the computer's list, every file that differs here comes down in
  * pieces into `<file>.atelier-part`, kept across an interruption and checked by
- * its hash before it takes the file's place.
+ * its hash before it takes the file's place. Both move several files at once
+ * (FILES_IN_FLIGHT), each file's pieces in order; the first refusal starts no
+ * more and is the copy's error.
  * sync --up is a push, --down a pull. --both: a file on one side only goes to
  * the other; a file changed on both sides: the newer one wins and the other is
  * kept beside it, named with who wrote it and when, "notes (k1, 7 Oct 08:31).md",
@@ -146,14 +147,16 @@ async function remoteList(into) {
   }
 }
 
-/* One file down, into <file>.atelier-part (kept across an interruption), checked, then in place. */
-async function fetchFile(into, f, dest) {
+/* One file down, into <file>.atelier-part (kept across an interruption), checked, then in place; no piece is asked
+ * once `signal` is aborted. */
+async function fetchFile(into, f, dest, signal) {
   const part = `${dest}.atelier-part`;
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   let at = fs.existsSync(part) ? fs.statSync(part).size : 0;
   if (at > f.size) { fs.rmSync(part); at = 0; }
   for (let tries = 0; tries < FILE_TRIES; tries++) {
     while (at < f.size) {
+      signal.throwIfAborted();
       const p = await into({ get: f.path, at });
       if (typeof p.data !== 'string') throw new Error(p.refused || `${f.path} did not come`);
       const b = Buffer.from(p.data, 'base64');
@@ -184,7 +187,11 @@ async function pull({ pick = () => true, place = (f) => path.join(folder, f.path
         if (!same) todo.push({ f, dest });
       }
       if (!quiet) console.error(`comparing … ${list.length} file${list.length === 1 ? '' : 's'}, ${sizeWords(todo.reduce((n, x) => n + x.f.size, 0))} to fetch`);
-      for (const x of todo) { got += await fetchFile(into, x.f, x.dest); files++; }
+      await inFlight(todo, FILES_IN_FLIGHT, async (x, signal) => {
+        const took = await fetchFile(into, x.f, x.dest, signal);
+        got += took;
+        files++;
+      });
       await into({ end: true });
     },
     onFrame: (f) => { if (typeof f.line === 'string' && !/^done · /.test(f.line)) process.stderr.write(`remote: ${f.line}\n`); },
