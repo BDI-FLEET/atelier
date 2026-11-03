@@ -51,46 +51,46 @@ function stoppedBy(host, { code, err }) {
 
 test('a push sends the pieces of up to FILES_IN_FLIGHT files at once and each file\'s pieces in order, every put after the one before it in that file was answered', async () => {
   const host = await pushHost({ latencyMs: ROUND_TRIP_MS })
+  const home = homeAt(host.url), all = someFiles()
   try {
-    const home = homeAt(host.url), all = someFiles()
     const run = await files(host, home, ['push', folderOf(home, all), 'k1:/research'])
     assert.equal(run.code, 0, run.err)
     inFlightInOrder(host, all.map((f) => f.sha256))
     assert.deepEqual(host.puts.filter((p) => p.early), [])
     assert.deepEqual(host.places.map((f) => f.sha256).sort(), all.map((f) => f.sha256).sort())
     assert.equal(host.ends.length, 1)
-  } finally { await host.close() }
+  } finally { await host.close(); fs.rmSync(home, { recursive: true, force: true }) }
 })
 
 test('a put refused while other files are in flight stops the push: no file starts after it, nothing is placed, and its words are the push\'s error', async () => {
   const all = someFiles()
   const host = await pushHost({ latencyMs: ROUND_TRIP_MS, refused: REFUSED, refuse: (p) => p.file === all[2].sha256 && p.at === 0 })
+  const home = homeAt(host.url)
   try {
-    const home = homeAt(host.url)
     stoppedBy(host, await files(host, home, ['push', folderOf(home, all), 'k1:/research']))
     assert.deepEqual(host.places, [])
-  } finally { await host.close() }
+  } finally { await host.close(); fs.rmSync(home, { recursive: true, force: true }) }
 })
 
 test('a pull fetches the pieces of up to FILES_IN_FLIGHT files at once and each file\'s pieces in order, every get after the one before it in that file was answered', async () => {
   const all = someFiles()
   const host = await pullHost({ files: all, latencyMs: ROUND_TRIP_MS })
+  const home = homeAt(host.url), down = path.join(home, 'down')
   try {
-    const home = homeAt(host.url), down = path.join(home, 'down')
     const run = await files(host, home, ['pull', 'k1:/research', down])
     assert.equal(run.code, 0, run.err)
     inFlightInOrder(host, all.map((f) => f.path))
     assert.deepEqual(all.filter((f) => !f.bytes.equals(fs.readFileSync(path.join(down, f.path)))).map((f) => f.path), [])
     assert.equal(host.ends.length, 1)
-  } finally { await host.close() }
+  } finally { await host.close(); fs.rmSync(home, { recursive: true, force: true }) }
 })
 
 test('a get refused while other files are in flight stops the pull: no file starts after it, the refused file is not placed, and its words are the pull\'s error', async () => {
   const all = someFiles()
   const host = await pullHost({ files: all, latencyMs: ROUND_TRIP_MS, refused: REFUSED, refuse: (p) => p.file === all[2].path && p.at === 0 })
+  const home = homeAt(host.url), down = path.join(home, 'down')
   try {
-    const home = homeAt(host.url), down = path.join(home, 'down')
     stoppedBy(host, await files(host, home, ['pull', 'k1:/research', down]))
     assert.equal(fs.existsSync(path.join(down, all[2].path)), false)
-  } finally { await host.close() }
+  } finally { await host.close(); fs.rmSync(home, { recursive: true, force: true }) }
 })
