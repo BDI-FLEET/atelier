@@ -37,6 +37,7 @@
     "config.js",
     "data.js",
     "files.js",
+    "artifacts.js",
     "agent.js",
     "modules-git.js",
     "session.js",
