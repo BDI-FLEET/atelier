@@ -3,7 +3,7 @@
 What `atelier computers` (computers.js), `atelier remote` (remote.js), `atelier create` (create.js), `atelier push` (push.js),
 `atelier clone` (clone.js) and `atelier releases` (releases.js) ask of a host, and (below, *The maintain verbs, the agents and the
 files*) `logs` (logs.js), `ps` (ps.js), `restart` (restart.js), `run` (run.js), `config` (config.js), `data` (data.js), `agent`
-(agent.js), `files` (files.js) and `artifacts adopt` (artifacts.js), each through ops.js. The CLI
+(agent.js), `files` (files.js), `artifacts adopt` (artifacts.js) and `apps adopt` (apps.js), each through ops.js. The CLI
 is coded against exactly this; the host's receiver (the hook of the host's git) answers it. Every call but the git push carries the
 session header the other verbs send, `Authorization: Session <session>`, from `~/.config/atelier/credentials` for that
 host.
@@ -104,7 +104,10 @@ app), the host checks the grant and sends the op to that computer, and what the 
   `{ verb: 'config', set?: [KEY…], unset?: [KEY…] }` (names only), `{ verb: 'data-pull' }`, `{ verb: 'data-push', confirm }`,
   `{ verb: 'files-push' | 'files-pull', path }` (no module: the computer's drive), `{ verb: 'artifacts-adopt', path }` (the
   drive's folder of artifacts moved there, on files write as a push: nothing goes in, one line an artifact comes out,
-  `<name> · <n> versions · <link>`, or `… · already · artifact <token>` for one adopted before), `{ verb: 'agents' }`,
+  `<name> · <n> versions · <link>`, or `… · already · artifact <token>` for one adopted before), `{ verb: 'apps-adopt',
+  path }` (the drive's folder of apps moved there, a folder holding a module.json each, on files write as a push: nothing
+  goes in, one line an app comes out, `<label> · live @ <commit> · <link>`, `… · already · module <id>` for one mounted
+  before, or `… · not mounted: <why>`, then `done · <n> mounted · <n> already · <n> not mounted`), `{ verb: 'agents' }`,
   `{ verb: 'agent-new' | 'agent-primary', name }` (a workspace instead of a module: `computer` as `attach` names it,
   the person's own when absent). `machine` names this machine in the host's record (its hostname, or `ATELIER_MACHINE`). `403 { error }` names the
   grant: `the grant is missing: maintain on notes`, `… files write on alex`, `… member of the chat k1/main serves`; the

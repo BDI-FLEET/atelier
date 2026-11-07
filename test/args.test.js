@@ -16,9 +16,9 @@ const CLI = path.resolve(HERE, '..', 'cli.js')
 
 const VERBS = [
   ['login'], ['whoami'], ['logout'], ['computers'], ['create'], ['remote'], ['clone'], ['push'], ['releases'],
-  ['logs'], ['ps'], ['restart'], ['run'], ['config'], ['data', 'pull'], ['files', 'sync'], ['artifacts', 'adopt'], ['agent'], ['attach'], ['agent', 'attach'],
+  ['logs'], ['ps'], ['restart'], ['run'], ['config'], ['data', 'pull'], ['files', 'sync'], ['artifacts', 'adopt'], ['apps', 'adopt'], ['agent'], ['attach'], ['agent', 'attach'],
 ]
-const WITH_HOST = new Set(['login', 'whoami', 'logout', 'computers', 'create', 'remote', 'clone', 'files sync', 'artifacts adopt', 'agent', 'attach', 'agent attach'])
+const WITH_HOST = new Set(['login', 'whoami', 'logout', 'computers', 'create', 'remote', 'clone', 'files sync', 'artifacts adopt', 'apps adopt', 'agent', 'attach', 'agent attach'])
 
 function cli(home, args) {
   const env = { ...process.env, HOME: home }

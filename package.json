@@ -38,6 +38,7 @@
     "data.js",
     "files.js",
     "artifacts.js",
+    "apps.js",
     "agent.js",
     "modules-git.js",
     "session.js",

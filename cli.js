@@ -29,6 +29,7 @@ const VERBS = new Map([
   ['data', './data.js'],
   ['files', './files.js'],
   ['artifacts', './artifacts.js'],
+  ['apps', './apps.js'],
 ]);
 // `atelier agent attach` is its own client; `agent`, `agent new`, `agent primary` are agent.js
 const AGENT = new Map([['attach', './agent-attach.js']]);
@@ -56,6 +57,7 @@ const USAGE = `usage: atelier <verb> [args]
   atelier agent attach [c][/w]  your terminal in front of an agent's live session, you type into it (--watch: see only)
   atelier files push | pull | sync   a folder to and from a computer's drive: computer:/path (sync --up|--down|--both)
   atelier artifacts adopt <c>:/path   the artifacts moved onto a computer's drive become its chat's
+  atelier apps adopt <c>:/path  the apps moved onto a computer's drive become its apps, pushed as its agent would
   atelier add <git-url>         clone a module's repository into this instance
   atelier update [module]       pull it; every module with a remote when none is named
   atelier package <module>      cut a checked snapshot of a module into a collection
