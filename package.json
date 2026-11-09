@@ -21,6 +21,7 @@
     "attach.js",
     "agent-attach.js",
     "attach-client.js",
+    "attach-terminal.js",
     "repo.js",
     "clone.js",
     "create.js",

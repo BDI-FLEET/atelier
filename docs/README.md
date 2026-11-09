@@ -125,7 +125,8 @@ A typical "production" folder sets something like `{ "hotReload": false, "auth":
 - `agent.js` — `atelier agent`, `agent new`, `agent primary`: the agents of a workspace.
 - `attach.js` — `atelier attach`: a terminal into a workspace's shell, through the host.
 - `agent-attach.js` — `atelier agent attach`: your terminal in front of an agent's live session.
-- `attach-client.js` — the one client of both attaches: the screen as the host streams it, the keys, the scrollback, the way out.
+- `attach-client.js` — the one client of both attaches: the target, the attach asked of the host, and its four routes on your session handed to the terminal.
+- `attach-terminal.js` — the attach's terminal, one for every caller: the screen as it streams, the keys, the size, the scrollback, the way out; what differs between callers comes in as functions, no address and no session.
 - `modules-git.js` — `atelier add` and `atelier update` for a module that is a git repository: cloned into the instance, pulled forward.
 - `discovery.js` — discovery rules (reserved names, workspaces) + `atelier.config.json` parsing.
 - `index.html` — template; React + ReactDOM UMD. A single inline rule resets margins and hints `color-scheme`; the shell paints zero pixels (no favicon, theme-color, or icon library — those belong to the chrome).

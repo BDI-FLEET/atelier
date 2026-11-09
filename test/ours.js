@@ -8,7 +8,7 @@ import { getJsx } from '../build.js'
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
 export const FILES = [
-  'agent-attach.js', 'agent.js', 'args.js', 'attach-client.js', 'attach.js', 'backend-host.js', 'backend-procs.js',
+  'agent-attach.js', 'agent.js', 'args.js', 'attach-client.js', 'attach-terminal.js', 'attach.js', 'backend-host.js', 'backend-procs.js',
   'clone.js', 'computers.js', 'config.js', 'create.js', 'data.js', 'files.js', 'frame.jsx', 'frames.js',
   'host-pages.jsx', 'hosted.js', 'page-at.js', 'page-drawn.js', 'login-screen.js', 'login.js', 'logout.js', 'logs.js', 'module-frame.jsx',
   'module-json.js', 'module-serve.js', 'modules-git.js', 'ops.js', 'ps.js', 'push.js', 'releases.js', 'remote.js',

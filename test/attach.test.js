@@ -1,4 +1,5 @@
-// atelier attach (attach.js) and atelier agent attach (agent-attach.js), one client (attach-client.js), exercised
+// atelier attach (attach.js) and atelier agent attach (agent-attach.js), one client (attach-client.js) on the one
+// terminal every attach's caller shares (attach-terminal.js), exercised
 // through the real CLI against an in-process fake of the host API's four attach routes: the
 // exit codes, the footer and the detach sentence, agent attach
 // writing by default, --watch without input, the target's defaults (the remote computer's main, a bare name, /name on
