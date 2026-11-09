@@ -40,6 +40,7 @@
     "files.js",
     "artifacts.js",
     "apps.js",
+    "memory.js",
     "agent.js",
     "modules-git.js",
     "session.js",
