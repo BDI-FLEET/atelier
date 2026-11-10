@@ -110,8 +110,15 @@ export const MODULE_NAME_CHARS = 64;
 /* The longest tool name a module declares: an agent's model takes tool names of at most 64 characters. */
 export const TOOL_NAME_CHARS = 64;
 
-/* The longest name of an agent of a workspace. */
+/* The longest name of an agent of a workspace: well inside the 256 characters Claude Code takes for an agent's name. */
 export const AGENT_NAME_CHARS = 32;
+
+/* The longest description written in an agent's definition on this machine (agent new --here): one line that says when
+ * to use it, not a second prompt. */
+export const AGENT_DESCRIPTION_CHARS = 1024;
+
+/* The longest model written in an agent's definition on this machine: an alias or a full model id. */
+export const AGENT_MODEL_CHARS = 128;
 
 /* The longest key of an app's config. */
 export const CONFIG_KEY_CHARS = 64;
