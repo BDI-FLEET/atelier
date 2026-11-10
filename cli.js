@@ -31,6 +31,7 @@ const VERBS = new Map([
   ['artifacts', './artifacts.js'],
   ['apps', './apps.js'],
   ['memory', './memory.js'],
+  ['agents', './agents.js'],
 ]);
 // `atelier agent attach` is its own client; `agent`, `agent new`, `agent primary` are agent.js
 const AGENT = new Map([['attach', './agent-attach.js']]);
@@ -54,7 +55,8 @@ const USAGE = `usage: atelier <verb> [args]
   atelier config [set K=v… | unset K…] [-r remote]   the app's settings and secrets; values never shown
   atelier data pull | push [-r remote]   the live data/ down into this folder, or this folder's up (recorded)
   atelier attach [c][/w]        a terminal into a workspace: its shell, through the host (--watch: see only)
-  atelier agent [c][/w]         the agents in a workspace; agent new <name> [--prompt file]; agent primary <name>
+  atelier agent [c][/w]         the agents in a workspace; agent new <name> [--prompt file] [--here]; agent primary <name>
+  atelier agents                every agent you have: primary or not, asked from where, its folder on this machine
   atelier agent attach [c][/w]  your terminal in front of an agent's live session, you type into it (--watch: see only)
   atelier files push | pull | sync   a folder to and from a computer's drive: computer:/path (sync --up|--down|--both)
   atelier artifacts adopt <c>:/path   the artifacts moved onto a computer's drive become its chat's

@@ -31,6 +31,9 @@ export const DEFAULT_HOST = `http://127.0.0.1:${DEV_HOST_PORT}`;
 /* The host's list of the computers a person is in. */
 export const COMPUTERS_PATH = '/api/computers';
 
+/* The host's list of the agents a person has. */
+export const AGENTS_PATH = '/api/agents';
+
 const home = () => process.env.HOME || os.homedir();
 const configHome = () => (path.isAbsolute(process.env.XDG_CONFIG_HOME || '') ? process.env.XDG_CONFIG_HOME : path.join(home(), '.config'));
 export const credentialsDir = () => path.join(configHome(), 'atelier');

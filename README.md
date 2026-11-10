@@ -233,6 +233,17 @@ remote: live data backed up (12 kB) · data replaced (48 MB) · notes restarted
 
 Inside a workspace one may sit in (the same right as `attach`), `atelier agent [computer][/workspace]` lists its agents, the primary first; `agent new <name> --prompt file` makes one beside it, its prompt held by the computer; `agent primary <name>` names who receives the chat. One session runs per workspace: an agent made beside the primary keeps its prompt, and its session does not start.
 
+`agent new <name> --prompt file --here` also gives the agent a folder on this machine, `./<name>/`: its prompt as `CLAUDE.md`, which Claude Code started in that folder reads as its instructions, and `.atelier-agent.json` naming the agent (its id as the host lists it, its name, the host, when), readable by you alone, never your session. A `./<name>` that is a file or a folder that is not empty is refused before anything is made. `atelier agents` lists every agent you have, one line each: primary or not, where it may be asked from, and its folder when you run it inside or beside one. Both are a machine's verbs.
+
+```
+$ atelier agent new reviewer --prompt reviewer.md --here
+remote: agent alex/main/reviewer · made · held by the fleet · it answers the chat once `agent primary reviewer` names it
+folder ./reviewer/ · CLAUDE.md its prompt · .atelier-agent.json names it · start claude there
+$ atelier agents
+  alex       primary · asked from nowhere
+  reviewer   asked from nowhere · folder ./reviewer/
+```
+
 ## Files
 
 `atelier files push <folder> <computer>:/<path>` copies a folder to a computer's drive, `files pull <computer>:/<path> <folder>` back; only what differs moves, several files at once (each file's pieces in order), and an interrupted copy picks up where it stopped; the first refusal stops the copy and is its error. `files sync <folder> <computer>:/<path> --up | --down | --both` keeps them in step; with `--both` a file changed on both sides keeps the newer one and the other beside it, `notes (agent, 7 Oct 08.31).md`. Push needs files write on that computer, pull files read. Nothing is deleted on either side; there is no `--watch` (run sync from a timer).
@@ -256,7 +267,7 @@ Four pages (a chrome may also surface these in-app), in this order:
 - **[docs/MODULES.md](docs/MODULES.md)** — **Modules**: module shape, `ctx`, real-time (`self`/`broadcast`), hot-reload, cross-module slots, sidecar servers — plus the special modules (the **chrome** + `@atelier/kit`).
 - **[docs/WORKSPACES.md](docs/WORKSPACES.md)** — **Workspaces**: the multi-tenant model (`global` + `$<ws>/`), the `qualifiedId`, rail and picker.
 - **[docs/AUTH.md](docs/AUTH.md)** — **Auth**: the auth-module slot, the `user`/`defaultUser` contract, request + WebSocket gating, takeover render.
-- **[docs/CLI.md](docs/CLI.md)** — **The CLI and the host**: what `computers`, `remote`, `create`, `push`, `releases`, the maintain verbs (`logs`, `ps`, `restart`, `run`, `config`, `data`), `agent` and `files` ask of a host, the push token, the exit codes.
+- **[docs/CLI.md](docs/CLI.md)** — **The CLI and the host**: what `computers`, `remote`, `create`, `push`, `releases`, the maintain verbs (`logs`, `ps`, `restart`, `run`, `config`, `data`), `agent`, `agents` and `files` ask of a host, the push token, the exit codes.
 - **[CHANGELOG.md](CHANGELOG.md)** — version history and migration notes.
 
 ## Tests

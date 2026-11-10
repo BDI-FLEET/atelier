@@ -35,12 +35,14 @@ export async function adoptHost(said, code) {
   return { url: `http://127.0.0.1:${server.address().port}`, asked, ins, close: () => new Promise((r) => { server.closeAllConnections(); server.close(r) }) }
 }
 
-/* atelier <args> from `home`, with no host, socket or sandbox named in its environment: its code, stdout and stderr. */
-export function cli(home, args) {
+/* atelier <args> from `home` (or `cwd`), with no host, socket or sandbox named in its environment but what `env` names:
+ * its code, stdout and stderr. */
+export function cli(home, args, { cwd = home, env: more = {} } = {}) {
   const env = { ...process.env, HOME: home }
   for (const k of ['ATELIER_HOST', 'XDG_CONFIG_HOME', 'ATELIER_SOCKET', 'ATELIER_SANDBOX']) delete env[k]
+  Object.assign(env, more)
   return new Promise((resolve) => {
-    const c = spawn(process.execPath, [CLI, ...args], { cwd: home, env })
+    const c = spawn(process.execPath, [CLI, ...args], { cwd, env })
     let out = '', err = ''
     c.stdout.on('data', (d) => { out += d })
     c.stderr.on('data', (d) => { err += d })
