@@ -24,8 +24,9 @@ export const SETTINGS_FILE = path.join(CLAUDE_DIR, 'settings.json');
 export const definitionOf = (name) => path.join(CLAUDE_DIR, 'agents', `${name}.md`);
 
 /* The check of an option written into the front matter: one line of printable characters, at most `most`; a control
- * character, a line or paragraph separator or a lone surrogate would end the line or break the YAML around it. */
-export const oneLine = (flag, most) => (v) => (v.trim() && v.length <= most && !/[\p{Cc}\p{Zl}\p{Zp}\p{Cs}]/u.test(v))
+ * character, a line or paragraph separator, a lone surrogate, a byte order mark or U+FFFE/U+FFFF would end the line or
+ * fall outside the characters YAML may hold. */
+export const oneLine = (flag, most) => (v) => (v.trim() && v.length <= most && !/[\p{Cc}\p{Zl}\p{Zp}\p{Cs}\uFEFF\uFFFE\uFFFF]/u.test(v))
   || `${flag}: one line of printable characters, at most ${most}`;
 
 /* The definition's text: front matter between two lines `---`, each value a double-quoted YAML scalar (a JSON string is
