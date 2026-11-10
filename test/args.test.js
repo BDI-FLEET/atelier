@@ -17,8 +17,9 @@ const CLI = path.resolve(HERE, '..', 'cli.js')
 const VERBS = [
   ['login'], ['whoami'], ['logout'], ['computers'], ['create'], ['remote'], ['clone'], ['push'], ['releases'],
   ['logs'], ['ps'], ['restart'], ['run'], ['config'], ['data', 'pull'], ['files', 'sync'], ['artifacts', 'adopt'], ['apps', 'adopt'], ['memory', 'adopt'], ['agent'], ['agents'], ['attach'], ['agent', 'attach'],
+  ['agent', 'share'], ['agent', 'unshare'], ['agent', 'rm'], ['agent', 'rules'],
 ]
-const WITH_HOST = new Set(['login', 'whoami', 'logout', 'computers', 'create', 'remote', 'clone', 'files sync', 'artifacts adopt', 'apps adopt', 'memory adopt', 'agent', 'agents', 'attach', 'agent attach'])
+const WITH_HOST = new Set(['login', 'whoami', 'logout', 'computers', 'create', 'remote', 'clone', 'files sync', 'artifacts adopt', 'apps adopt', 'memory adopt', 'agent', 'agents', 'attach', 'agent attach', 'agent share', 'agent unshare', 'agent rm', 'agent rules'])
 
 function cli(home, args) {
   const env = { ...process.env, HOME: home }
@@ -33,7 +34,7 @@ test('every verb answers -h with its help (the --host line from the default host
   try {
     for (const verb of VERBS) {
       const name = verb.join(' ')
-      const said = name === 'agent attach' ? name : verb[0]
+      const said = verb[0] === 'agent' && verb[1] ? name : verb[0]
       const help = cli(home, [...verb, '-h'])
       assert.equal(help.code, 0, `${name}: ${help.out}`)
       assert.match(help.out, new RegExp(`^usage: atelier ${said}`), name)

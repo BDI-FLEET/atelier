@@ -34,8 +34,11 @@ import { OP_QUIET_MS, OP_FOLLOW_MS, MACHINE_NAME_CHARS, PIECE } from './limits.j
 
 export { inSandbox };
 
+/* What went wrong for a verb that goes on: one sentence. */
+export const complainer = (name) => (msg) => console.error(`\natelier ${name}: ${msg}\n`);
+
 /* A verb's failure: one sentence, the exit code. */
-export const failer = (name) => (msg, code = 2) => { console.error(`\natelier ${name}: ${msg}\n`); process.exit(code); };
+export const failer = (name) => (msg, code = 2) => { complainer(name)(msg); process.exit(code); };
 
 /* Where an app lives: this module folder's remote → { host, computer, module }. Without -r the verb would act on your
  * own instance, which the CLI does not do: it says so in one line and names the -r form. */

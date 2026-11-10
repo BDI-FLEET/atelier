@@ -3,7 +3,8 @@
  * workspace; new makes one beside the others, a model session with its own
  * system prompt. Every workspace has one primary agent, which receives the
  * chat and the calls and gets the handover; it is the first agent unless
- * agent primary <name> says otherwise. (agent attach: agent-attach.js.)
+ * agent primary <name> says otherwise. (agent attach: agent-attach.js; agent
+ * share, unshare, rules, rm: agent-manage.js.)
  *
  *   atelier agent [computer][/workspace]
  *   atelier agent new <name> [--prompt file] [--here --description line [--model m]] [computer][/workspace]
@@ -20,6 +21,11 @@
  * primary are recorded. One session runs per workspace: an agent made beside
  * the primary keeps its prompt, and its session does not start.
  *
+ * An agent new makes on your own computer is shared at once with your own 1:1, the chat that computer serves, by the
+ * route agent share asks (agent-host.js): the agent there may ask it, on your word, its connector holding nothing. One
+ * made on another computer (a room's) is shared with no chat: agent share names one. A share refused leaves the agent
+ * made; the line says so and the verb that shares it, and the exit is 1.
+ *
  * new --here also gives the agent a folder on this machine, ./<name>/ (agent-folder.js), which holds it as Claude Code
  * defines an agent: .claude/agents/<name>.md, its name and --description in front matter and its prompt the body, which
  * is the agent's own system prompt in place of Claude Code's; .claude/settings.json, so claude started there is that
@@ -30,16 +36,18 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { failer, runOp, exitOf, inSandbox } from './ops.js';
+import { failer, complainer, runOp, exitOf, inSandbox } from './ops.js';
 import { resolveHost } from './session.js';
 import { readArgs, helpOf, HOST } from './args.js';
 import { AGENT_NAME_CHARS, AGENT_DESCRIPTION_CHARS, AGENT_MODEL_CHARS } from './limits.js';
-import { NAMING_FILE, SETTINGS_FILE, definitionOf, oneLine, agentsAt, notFree, layOut } from './agent-folder.js';
+import { NAMING_FILE, SETTINGS_FILE, definitionOf, oneLine, notFree, layOut } from './agent-folder.js';
+import { agentsAt, ownAt, ownChatOf, agentAnswer, sharedLine, thrown, YOUR_ONE_TO_ONE } from './agent-host.js';
 
 const AGENT_NAME = new RegExp(`^[a-z][a-z0-9-]{0,${AGENT_NAME_CHARS - 1}}$`);
 const SPEC = {
   usage: 'atelier agent [computer][/workspace]\n       atelier agent new <name> [--prompt file] [--here --description line [--model m]] [computer][/workspace]\n'
-    + '       atelier agent primary <name> [computer][/workspace]\n       atelier agent attach [computer][/workspace] [--watch]',
+    + '       atelier agent primary <name> [computer][/workspace]\n       atelier agent attach [computer][/workspace] [--watch]\n'
+    + '       atelier agent share|unshare <name> [<chat>]\n       atelier agent rules <name> --prompt file\n       atelier agent rm <name>',
   options: [{ flag: '--prompt', value: 'file', subs: ['new'], help: 'the new agent\'s system prompt' },
     { flag: '--here', subs: ['new'], help: `and its folder on this machine, ./<name>/, holding it as Claude Code's agent:\n`
       + `${definitionOf('<name>')} defines it, its prompt the agent's own system prompt;\n`
@@ -50,7 +58,7 @@ const SPEC = {
       help: 'with --here: the model its definition names, as written (an alias or a full model id)' }, HOST],
 };
 const USAGE = helpOf(SPEC);
-const fail = failer('agent');
+const fail = failer('agent'), complain = complainer('agent');
 const argv = process.argv.slice(2);
 const sub = argv[0] === 'new' || argv[0] === 'primary' ? argv.shift() : 'list';
 const { opts, words } = readArgs(argv, { ...SPEC, sub, most: sub === 'list' ? 1 : 2 }, fail);
@@ -75,16 +83,48 @@ const code = await runOp('agent', where, op, {
   during: sub === 'new' ? (into) => into({ prompt: prompt ?? '' }) : undefined,
   socket: sub === 'new' ? { prompt: prompt ?? '' } : undefined,
 });
-if (folder && code === 0) await layOutMade();
+if (sub === 'new' && code === 0 && !inSandbox()) await afterMade();
 process.exit(exitOf(code));
 
-/* The folder of the agent just made, named by the id the host lists it with. */
-async function layOutMade() {
-  const notLaid = (why) => fail(`agent ${name} was made, but ${why}: no folder laid out · atelier agents`, 1);
-  const made = (await agentsAt(where.host, notLaid)).find((a) => a.name === name);
-  if (!made) notLaid('the host does not list it');
+/* The agent just made, found in the host's list by its name (one per person): shared with your own 1:1, then given its
+ * folder with --here. It stays made whatever fails here: each failure is said with what is not done, and the exit is 1. */
+async function afterMade() {
+  const undone = [`not shared with ${YOUR_ONE_TO_ONE}`, folder && 'no folder laid out'].filter(Boolean).join(', ');
+  const madeBut = (why) => fail(`agent ${name} was made, but ${why}: ${undone} · atelier agents`, 1);
+  const made = (await agentsAt(where.host, madeBut)).find((a) => a.name === name);
+  if (!made) madeBut('the host does not list it');
+  const shared = await shareAtBirth(made);
+  const laid = !folder || layOutMade(made);
+  if (!shared || !laid) process.exit(1);
+}
+
+/* The agent shared with the 1:1 its own computer serves, the share naming the chat alone; one line says it. False when
+ * the host did not share it. */
+async function shareAtBirth(made) {
+  const notShared = (why) => {
+    complain(`agent ${name} was made, but it is not shared with ${YOUR_ONE_TO_ONE} (${why}): your agent there may not ask it yet · atelier agent share ${name}`);
+    return false;
+  };
+  try {
+    const chat = ownChatOf(await ownAt(where.host, thrown), made);
+    if (!chat) {
+      console.log(`agent ${name} lives on ${made.computerName ?? made.computer}, not your own computer: shared with no chat yet · atelier agent share ${name} <chat>`);
+      return true;
+    }
+    await agentAnswer(where.host, thrown, made, 'share', { to: chat });
+  } catch (e) { return notShared(e.message); }
+  console.log(sharedLine(name, YOUR_ONE_TO_ONE, true));
+  return true;
+}
+
+/* The folder of the agent just made, named by the id the host lists it with; false when it could not be laid out. */
+function layOutMade(made) {
   const fields = { name, description: opts.description, model: opts.model };
   try { layOut(folder, fields, prompt, { id: made.id, name, host: where.host, made: new Date().toISOString() }); }
-  catch (e) { notLaid(`${shown} could not be laid out (${e.code ?? e.message})`); }
+  catch (e) {
+    complain(`agent ${name} was made, but ${shown} could not be laid out (${e.code ?? e.message}): no folder laid out · atelier agents`);
+    return false;
+  }
   console.log(`folder ${shown} · ${definitionOf(name)} defines it · start it: cd ${name} && claude · or there: claude --agent ${name}`);
+  return true;
 }

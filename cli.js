@@ -33,8 +33,10 @@ const VERBS = new Map([
   ['memory', './memory.js'],
   ['agents', './agents.js'],
 ]);
-// `atelier agent attach` is its own client; `agent`, `agent new`, `agent primary` are agent.js
-const AGENT = new Map([['attach', './agent-attach.js']]);
+// `atelier agent attach` is its own client; share, unshare, rules and rm are agent-manage.js; `agent`, `agent new`,
+// `agent primary` are agent.js
+const ATTACH = './agent-attach.js';
+const AGENT = new Map([['attach', ATTACH], ...['share', 'unshare', 'rules', 'rm'].map((sub) => [sub, './agent-manage.js'])]);
 // The usage: one line per verb (`atelier help`, `--help`, `-h`, and a word that is no verb)
 const USAGE = `usage: atelier <verb> [args]
   atelier                       run the instance in this folder (atelier start [--port n] the same)
@@ -56,6 +58,8 @@ const USAGE = `usage: atelier <verb> [args]
   atelier data pull | push [-r remote]   the live data/ down into this folder, or this folder's up (recorded)
   atelier attach [c][/w]        a terminal into a workspace: its shell, through the host (--watch: see only)
   atelier agent [c][/w]         the agents in a workspace; agent new <name> [--prompt file] [--here --description line]; agent primary <name>
+  atelier agent share|unshare <name> [<chat>]   who may ask one of your agents: your 1:1 when no chat is named
+  atelier agent rules <name> --prompt file   its prompt replaced · agent rm <name>: it is deleted
   atelier agents                every agent you have: your 1:1's primary or not, asked from where, its folder here
   atelier agent attach [c][/w]  your terminal in front of an agent's live session, you type into it (--watch: see only)
   atelier files push | pull | sync   a folder to and from a computer's drive: computer:/path (sync --up|--down|--both)
@@ -104,7 +108,8 @@ if (word === 'start') {
   await import('./server.js');
 } else if (process.argv[2] === 'agent') {
   const sub = AGENT.get(process.argv[3]);
-  if (sub) { process.argv.splice(2, 2); await import(sub); }   // agent attach reads its args from argv[2…]
+  if (sub === ATTACH) { process.argv.splice(2, 2); await import(sub); }   // agent attach reads its args from argv[2…]
+  else if (sub) { process.argv.splice(2, 1); await import(sub); }   // agent share|unshare|rules|rm reads its sub-verb from argv[2]
   else { process.argv.splice(2, 1); await import('./agent.js'); }   // agent [target], agent new, agent primary
 } else if (verb) {
   process.argv.splice(2, 1);   // the verb reads its args from argv[2…]

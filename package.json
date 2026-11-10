@@ -44,6 +44,8 @@
     "agent.js",
     "agents.js",
     "agent-folder.js",
+    "agent-host.js",
+    "agent-manage.js",
     "modules-git.js",
     "session.js",
     "sandbox.js",

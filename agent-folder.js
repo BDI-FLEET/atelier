@@ -9,12 +9,10 @@
  *   .atelier-agent.json        which agent the folder is, { id, name, host, made }, readable by you alone; never the
  *                              session, which stays in the credentials file (session.js)
  *
- * The agents are the host's: the person's list (GET /api/agents) names each one's id.
+ * The agents are the host's: the person's list (agent-host.js) names each one's id.
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { askHost, hostAnswer, AGENTS_PATH } from './session.js';
-import { sessionAt } from './ops.js';
 
 export const NAMING_FILE = '.atelier-agent.json';
 const CLAUDE_DIR = '.claude';
@@ -34,12 +32,6 @@ export const oneLine = (flag, most) => (v) => (v.trim() && v.length <= most && !
 export function definition(fields, prompt) {
   const front = Object.entries(fields).filter(([, v]) => v !== undefined).map(([k, v]) => `${k}: ${JSON.stringify(v)}`);
   return ['---', ...front, '---', ''].join('\n') + prompt;
-}
-
-/* The agents the person has at `host`, as its list answers them: { id, name, primary?, exposures, … } each. */
-export async function agentsAt(host, fail) {
-  const listed = hostAnswer(await askHost(host, 'GET', AGENTS_PATH, { session: sessionAt(host, fail).session }), host, fail);
-  return (Array.isArray(listed.agents) ? listed.agents : []).filter((a) => a && typeof a.id === 'string' && typeof a.name === 'string');
 }
 
 /* Why `dir` cannot be laid out, `shown` naming it: a file, or a folder that is not empty; null when it is absent or empty. */

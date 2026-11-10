@@ -235,13 +235,20 @@ Inside a workspace one may sit in (the same right as `attach`), `atelier agent [
 
 `agent new <name> --prompt file --here --description "<one line>"` also gives the agent a folder on this machine, `./<name>/`, holding it as Claude Code defines an agent. `.claude/agents/<name>.md` is its definition: front matter with its `name`, the `description` (and the `model`, given `--model`), then the prompt file byte for byte, which is the agent's own system prompt in place of Claude Code's (a `CLAUDE.md` would only add instructions to Claude Code's own). `.claude/settings.json` holds `{ "agent": "<name>" }`, so `claude` started in the folder is that agent, as is `claude --agent <name>` there. `.atelier-agent.json` names the agent (its id as the host lists it, its name, the host, when), readable by you alone, never your session. Claude Code skips a definition without a description, so `--here` needs one: one line, at most `AGENT_DESCRIPTION_CHARS` (limits.js); it and the model are written in the folder alone, never sent to the host. A `./<name>` that is a file or a folder that is not empty is refused before anything is made. `atelier agents` lists every agent the fleet holds as yours, one line each: whether it is the primary of your 1:1 (your own agent, once made askable on the Agents page), where it may be asked from, and its folder when you run it inside or beside one. Which agent a workspace runs is that workspace's: `atelier agent`. Both are a machine's verbs.
 
+The agent of your 1:1 knows the agents you make, and may ask them. `agent new` on your own computer (with or without `--here`) shares the agent at once with your own 1:1, the chat that computer serves, as the Agents page shares one: the agent of your 1:1 may ask it, on a message of yours, and its connector (its own sandbox on your computer) holds nothing you did not give it. If that share is refused, the agent stays made, the line says it is not yet askable and `atelier agent share <name>` shares it (exit 1). An agent made on another computer (a room's workspace) is shared with no chat: name one with `agent share`. `atelier agents` says `your 1:1` among where each one may be asked from.
+
+`agent share <name> [<chat>]` and `agent unshare <name> [<chat>]` say who may ask one of your agents: no chat is your own 1:1 (the one its own computer serves); a chat to share with is named as the host offers it, a chat you are in with an agent of its own, by its name or its id; a chat to unshare from is one `atelier agents` lists for it. Shared there already, or not shared there, nothing is asked. `agent rules <name> --prompt file` replaces the prompt the host holds; `agent rm <name>` deletes the agent. The agent is named as `atelier agents` lists it. A folder of it on this machine stays as it is: its definition keeps the prompt it was laid out with. All four are a machine's verbs.
+
 ```
 $ atelier agent new reviewer --prompt reviewer.md --here --description "Reads pull requests and says what breaks"
 remote: agent alex/main/reviewer · made · held by the fleet · it answers the chat once `agent primary reviewer` names it
+agent reviewer · shared with your 1:1: your agent there may ask it
 folder ./reviewer/ · .claude/agents/reviewer.md defines it · start it: cd reviewer && claude · or there: claude --agent reviewer
+$ atelier agent share reviewer Tesis
+agent reviewer · shared with Tesis: the agent there may ask it, on a message of yours
 $ atelier agents
   Alex's Bayard   primary of your 1:1 · asked from nowhere
-  reviewer        asked from nowhere · folder ./reviewer/
+  reviewer        asked from your 1:1, Tesis · folder ./reviewer/
 ```
 
 ## Files
