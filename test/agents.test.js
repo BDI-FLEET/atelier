@@ -147,26 +147,27 @@ test('agent new --here without --prompt is written wrongly, before asking the ho
   } finally { await host.close(); fs.rmSync(home, { recursive: true, force: true }) }
 })
 
-test('atelier agents lists every agent of the person, one line each: its name, primary or not, where it may be asked from, and the folder this machine holds for it, from beside the folder or inside it; never its prompt', async () => {
-  const ALEX = { id: 'agent:1a2b3c', name: 'alex' }, SCOUT = { id: 'agent:4d5e6f', name: 'scout' }
-  const host = await agentsHost({ agents: [agentOf(ALEX, { primary: true }), agentOf(REVIEWER, { exposures: ['Sam', 'example-co'] }), agentOf(SCOUT)] })
+test('atelier agents lists every agent of the person, one line each: its name, whether it is their 1:1\'s primary made askable, where it may be asked from, and the folder this machine holds for it (its id and host), from beside the folder or inside it; never its prompt', async () => {
+  const ALEX = { id: 'agent:1a2b3c', name: 'Alex\'s Bayard' }, SCOUT = { id: 'agent:4d5e6f', name: 'scout' }, DRAFTER = { id: 'agent:7a8b9c', name: 'drafter' }
+  const host = await agentsHost({ agents: [agentOf(ALEX, { primary: true }), agentOf(REVIEWER, { exposures: ['Sam', 'example-co'] }), agentOf(SCOUT), agentOf(DRAFTER)] })
   const home = homeAt(host.url)
   const lay = (name, naming) => { fs.mkdirSync(path.join(home, name)); fs.writeFileSync(path.join(home, name, NAMING), JSON.stringify(naming)) }
   try {
     lay('reviewer', { ...REVIEWER, host: host.url, made: '2026-11-10T10:00:00.000Z' })
-    lay('alex', { ...ALEX, host: 'http://elsewhere.example', made: '2026-11-10T10:00:00.000Z' })
-    lay('scout', { id: 'agent:000000', name: 'scout', host: host.url, made: '2026-11-10T10:00:00.000Z' })
+    lay('scout', { ...SCOUT, host: 'http://elsewhere.example', made: '2026-11-10T10:00:00.000Z' })
+    lay('drafter', { id: 'agent:000000', name: 'drafter', host: host.url, made: '2026-11-10T10:00:00.000Z' })
     const beside = await cli(home, ['agents', '--host', host.url])
     assert.equal(beside.code, 0, beside.err)
     assert.deepEqual(lines(beside.out), [
-      '  alex       primary · asked from nowhere',
-      '  reviewer   asked from Sam, example-co · folder ./reviewer/',
-      '  scout      asked from nowhere',
+      '  Alex\'s Bayard   primary of your 1:1 · asked from nowhere',
+      '  reviewer        asked from Sam, example-co · folder ./reviewer/',
+      '  scout           asked from nowhere',
+      '  drafter         asked from nowhere',
     ])
     assert.ok(!beside.out.includes(RULES))
     const inside = await cli(home, ['agents', '--host', host.url], { cwd: path.join(home, 'reviewer') })
     assert.equal(inside.code, 0, inside.err)
-    assert.equal(lines(inside.out)[1], '  reviewer   asked from Sam, example-co · folder here')
+    assert.equal(lines(inside.out)[1], '  reviewer        asked from Sam, example-co · folder here')
     assert.deepEqual(host.asked, [], 'no op: the list is the host\'s')
   } finally { await host.close(); fs.rmSync(home, { recursive: true, force: true }) }
 })

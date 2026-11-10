@@ -56,7 +56,7 @@ const USAGE = `usage: atelier <verb> [args]
   atelier data pull | push [-r remote]   the live data/ down into this folder, or this folder's up (recorded)
   atelier attach [c][/w]        a terminal into a workspace: its shell, through the host (--watch: see only)
   atelier agent [c][/w]         the agents in a workspace; agent new <name> [--prompt file] [--here]; agent primary <name>
-  atelier agents                every agent you have: primary or not, asked from where, its folder on this machine
+  atelier agents                every agent you have: your 1:1's primary or not, asked from where, its folder here
   atelier agent attach [c][/w]  your terminal in front of an agent's live session, you type into it (--watch: see only)
   atelier files push | pull | sync   a folder to and from a computer's drive: computer:/path (sync --up|--down|--both)
   atelier artifacts adopt <c>:/path   the artifacts moved onto a computer's drive become its chat's

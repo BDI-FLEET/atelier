@@ -233,15 +233,15 @@ remote: live data backed up (12 kB) · data replaced (48 MB) · notes restarted
 
 Inside a workspace one may sit in (the same right as `attach`), `atelier agent [computer][/workspace]` lists its agents, the primary first; `agent new <name> --prompt file` makes one beside it, its prompt held by the computer; `agent primary <name>` names who receives the chat. One session runs per workspace: an agent made beside the primary keeps its prompt, and its session does not start.
 
-`agent new <name> --prompt file --here` also gives the agent a folder on this machine, `./<name>/`: its prompt as `CLAUDE.md`, which Claude Code started in that folder reads as its instructions, and `.atelier-agent.json` naming the agent (its id as the host lists it, its name, the host, when), readable by you alone, never your session. A `./<name>` that is a file or a folder that is not empty is refused before anything is made. `atelier agents` lists every agent you have, one line each: primary or not, where it may be asked from, and its folder when you run it inside or beside one. Both are a machine's verbs.
+`agent new <name> --prompt file --here` also gives the agent a folder on this machine, `./<name>/`: its prompt as `CLAUDE.md`, which Claude Code started in that folder reads as its instructions, and `.atelier-agent.json` naming the agent (its id as the host lists it, its name, the host, when), readable by you alone, never your session. A `./<name>` that is a file or a folder that is not empty is refused before anything is made. `atelier agents` lists every agent the fleet holds as yours, one line each: whether it is the primary of your 1:1 (your own agent, once made askable on the Agents page), where it may be asked from, and its folder when you run it inside or beside one. Which agent a workspace runs is that workspace's: `atelier agent`. Both are a machine's verbs.
 
 ```
 $ atelier agent new reviewer --prompt reviewer.md --here
 remote: agent alex/main/reviewer · made · held by the fleet · it answers the chat once `agent primary reviewer` names it
 folder ./reviewer/ · CLAUDE.md its prompt · .atelier-agent.json names it · start claude there
 $ atelier agents
-  alex       primary · asked from nowhere
-  reviewer   asked from nowhere · folder ./reviewer/
+  Alex's Bayard   primary of your 1:1 · asked from nowhere
+  reviewer        asked from nowhere · folder ./reviewer/
 ```
 
 ## Files
