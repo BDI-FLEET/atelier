@@ -42,9 +42,16 @@ export async function computersAt(host, fail) {
 /* The 1:1 a computer serves when it is the person's own; null for every other computer. */
 const ownChatIn = (computer) => (computer?.kind === 'own' && typeof computer.chat === 'string' ? computer.chat : null);
 
+/* The computer of the person's an agent lives on; undefined when it is none of them. */
+const homeOf = (computers, agent) => computers.find((c) => c.computer === agent.computer);
+
 /* The person's own 1:1 an agent may be asked from by default: the one its own computer serves, when the agent lives
  * there; null when it lives on a computer that is not theirs. */
-export const ownChatOf = (computers, agent) => ownChatIn(computers.find((c) => c.computer === agent.computer));
+export const ownChatOf = (computers, agent) => ownChatIn(homeOf(computers, agent));
+
+/* The computer an agent lives on as the person names it: its label, as atelier computers lists it; the name the host
+ * gives the agent's computer when it is none of theirs. */
+export const homeNameOf = (computers, agent) => homeOf(computers, agent)?.label ?? agent.computerName ?? agent.computer;
 
 /* Where an agent may be asked from, each { id, name }: the person's own 1:1 named as such, every other place by the name
  * the host gives it. */

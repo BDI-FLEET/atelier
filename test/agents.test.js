@@ -45,9 +45,10 @@ const NO_SUCH_AGENT = 'there is no such agent here'
 const SHARE_REFUSED = 'you can share your own agents, with chats you are in'
 const UNSHARE_REFUSED = 'that agent is not shared there, or it is not yours to say'
 
-/* One agent as GET /api/agents answers it; an exposure a name (a chat of that name) or { to, name }. */
-const agentOf = ({ id, name, computer = OWN.computer, computerName = OWN.label }, { exposures = [], primary = false } = {}) => ({
-  id, name, computer, computerName, tools: [], uses: [], rules: RULES, version: 1,
+/* One agent as GET /api/agents answers it, `computerName` the name the kernel holds for its computer, the token (core's
+ * services/portal/views.ts); an exposure a name (a chat of that name) or { to, name }. */
+const agentOf = ({ id, name, computer = OWN.computer }, { exposures = [], primary = false } = {}) => ({
+  id, name, computer, computerName: computer.slice('computer:'.length), tools: [], uses: [], rules: RULES, version: 1,
   exposures: exposures.map((x, i) => ({ to: x.to ?? `chat:c${i}`, name: x.name ?? x, mode: ON_MY_WORD, also: [], draft: false })), sandboxes: [],
   ...(primary ? { primary: true } : {}),
 })
@@ -431,7 +432,7 @@ test('when the share at birth is refused the agent stays made and its folder is 
 })
 
 test('agent new on a computer that is not your own shares nothing at birth and says where the agent lives and the verb that shares it with a chat', async () => {
-  const host = await agentsHost({ made: { ...REVIEWER, computer: TESIS.computer, computerName: TESIS.label } }), home = homeWithPrompt(host.url)
+  const host = await agentsHost({ made: { ...REVIEWER, computer: TESIS.computer } }), home = homeWithPrompt(host.url)
   try {
     const r = await cli(home, ['agent', 'new', 'reviewer', '--prompt', 'reviewer.md', 'tesis/main', '--host', host.url])
     assert.equal(r.code, 0, r.err)
@@ -490,7 +491,7 @@ test('agent share refuses an agent you do not have, a chat the host does not off
 })
 
 test('agent share with no chat for an agent that lives on another computer asks for the chat, nothing posted, and a share the host refuses fails with its sentence and exit 4', async () => {
-  const elsewhere = agentOf({ ...REVIEWER, computer: TESIS.computer, computerName: TESIS.label })
+  const elsewhere = agentOf({ ...REVIEWER, computer: TESIS.computer })
   const host = await agentsHost({ agents: [elsewhere], refuseShare: SHARE_REFUSED }), home = homeAt(host.url)
   try {
     const own = await cli(home, ['agent', 'share', 'reviewer', '--host', host.url])

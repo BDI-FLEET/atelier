@@ -24,7 +24,7 @@ import { resolveHost } from './session.js';
 import { failer, inSandbox } from './ops.js';
 import { readArgs, helpOf, HOST } from './args.js';
 import { folderFor } from './agent-folder.js';
-import { listedAt, computersAt, ownChatOf, placesOf, oneNamed, agentAnswer, sharedLine, YOUR_ONE_TO_ONE } from './agent-host.js';
+import { listedAt, computersAt, ownChatOf, homeNameOf, placesOf, oneNamed, agentAnswer, sharedLine, YOUR_ONE_TO_ONE } from './agent-host.js';
 
 const USAGES = {
   share: 'atelier agent share <name> [<chat>]',
@@ -75,7 +75,7 @@ if (sub === 'rules') {
 /* No chat named: the person's own 1:1, the one the agent's own computer serves. */
 function ownOne(computers) {
   const to = ownChatOf(computers, agent);
-  if (!to) fail(`${agent.name} lives on ${agent.computerName ?? agent.computer}, not your own computer: name the chat · atelier agent ${sub} ${agent.name} <chat>`);
+  if (!to) fail(`${agent.name} lives on ${homeNameOf(computers, agent)}, not your own computer: name the chat · atelier agent ${sub} ${agent.name} <chat>`);
   return { to, where: YOUR_ONE_TO_ONE };
 }
 
