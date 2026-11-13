@@ -10,6 +10,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { screen, SCENE, SCENE_WIDTH } from '../login-screen.js'
+import { resolveHost, unreachable, DEFAULT_HOST } from '../session.js'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const CLI = path.resolve(HERE, '..', 'cli.js')
@@ -100,6 +101,31 @@ function cli(home, args, { env = {}, input } = {}) {
 const tmpHome = () => fs.mkdtempSync(path.join(os.tmpdir(), 'atelier-login-'))
 const credFile = (home) => path.join(home, '.config', 'atelier', 'credentials')
 const creds = (home) => JSON.parse(fs.readFileSync(credFile(home), 'utf8'))
+
+test('a host that cannot be reached is said so, and when none was chosen (no --host, no ATELIER_HOST) the sentence says no host was chosen and how to choose one', async () => {
+  const plain = (host) => `the host at ${host} cannot be reached`
+  const kept = process.env.ATELIER_HOST
+  try {
+    delete process.env.ATELIER_HOST
+    assert.equal(resolveHost(), DEFAULT_HOST)
+    assert.equal(unreachable(DEFAULT_HOST), `${plain(DEFAULT_HOST)}: no host was chosen, and nothing answers at the default · choose one: --host <url>, or ATELIER_HOST=<url> for every call`)
+    assert.equal(resolveHost(DEFAULT_HOST), DEFAULT_HOST)
+    assert.equal(unreachable(DEFAULT_HOST), plain(DEFAULT_HOST), '--host names the default: it was chosen')
+    process.env.ATELIER_HOST = DEFAULT_HOST
+    resolveHost()
+    assert.equal(unreachable(DEFAULT_HOST), plain(DEFAULT_HOST), 'ATELIER_HOST names it: it was chosen')
+  } finally { if (kept === undefined) delete process.env.ATELIER_HOST; else process.env.ATELIER_HOST = kept }
+  const nowhere = 'http://127.0.0.1:1', home = tmpHome()
+  try {
+    fs.mkdirSync(path.dirname(credFile(home)), { recursive: true, mode: 0o700 })
+    fs.writeFileSync(credFile(home), JSON.stringify({ [nowhere]: { session: SECRET } }), { mode: 0o600 })
+    for (const [args, env] of [[['whoami', '--host', nowhere], {}], [['whoami'], { ATELIER_HOST: nowhere }]]) {
+      const r = await cli(home, args, { env })
+      assert.equal(r.code, 1, r.out)
+      assert.equal(r.stderr, `\natelier whoami: ${plain(nowhere)}\n\n`)
+    }
+  } finally { fs.rmSync(home, { recursive: true, force: true }) }
+})
 
 test('the session is kept private, per host (0600 in a 0700 folder), and never reaches the terminal', async () => {
   const host = await fakeHost()

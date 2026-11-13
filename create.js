@@ -93,7 +93,7 @@ const later = `project ${name} · ${notSignedIn(host)}, then atelier remote <com
 if (!entry) { console.log(later); process.exit(0); }
 const r = await askHost(host, 'GET', COMPUTERS_PATH, { session: entry.session });
 if (r.status === 401) { console.log(later); process.exit(0); }
-if (r.status === 0) { console.log(`project ${name} · ${unreachable(host)}: atelier remote <computer> later`); process.exit(0); }
+if (r.status === 0) { console.log(`project ${name} · ${unreachable(host)} · atelier remote <computer> later`); process.exit(0); }
 const own = r.status === 200 && Array.isArray(r.body.computers) ? r.body.computers.find((c) => c && c.kind === 'own' && c.label) : null;
 if (!own) { console.log(`project ${name} · no computer of your own at ${host}: atelier remote <computer>`); process.exit(0); }
 setRemote(dir, DEFAULT_REMOTE, remoteUrl(host, own.label, label), fail);

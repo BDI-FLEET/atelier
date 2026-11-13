@@ -15,7 +15,9 @@
  *
  * Which host: there is one default host, and --host signs in to another one:
  * --host <url> for that call, else ATELIER_HOST (how a machine names its
- * default host), else DEFAULT_HOST (the default host in dev).
+ * default host), else DEFAULT_HOST (the default host in dev); a verb whose
+ * host fell to DEFAULT_HOST and finds nothing there says that no host was
+ * chosen and how to choose one.
  * Signing in somewhere else never moves the default.
  *
  * Kept free of packages (node builtins, global fetch and limits.js) and apart from the
@@ -62,8 +64,16 @@ export function writeCredentials(creds) {
   fs.renameSync(tmp, file);
 }
 
+/* The host this machine names by default: ATELIER_HOST, else DEFAULT_HOST. */
+const defaultHost = () => normalHost(process.env.ATELIER_HOST || DEFAULT_HOST);
+
+/* Whether the verb's host fell to DEFAULT_HOST, neither --host nor ATELIER_HOST naming one: set as the verb resolves it. */
+let noneChosen = false;
+
+/* The host a verb acts on: --host for that call, else the default. */
 export function resolveHost(flagHost) {
-  return normalHost(flagHost || process.env.ATELIER_HOST || DEFAULT_HOST);
+  noneChosen = !flagHost && !process.env.ATELIER_HOST;
+  return flagHost ? normalHost(flagHost) : defaultHost();
 }
 
 /* One call to the host's API. Answers { status, body }; a host that cannot
@@ -87,11 +97,12 @@ export async function askHost(host, method, route, { body, session } = {}) {
 export const sentenceOf = (r, fallback) =>
   (typeof r.body.error === 'string' && r.body.error) || (typeof r.body.refused === 'string' && r.body.refused) || fallback;
 
-export const unreachable = (host) => `the host at ${host} cannot be reached`;
+export const unreachable = (host) => `the host at ${host} cannot be reached${noneChosen && host === DEFAULT_HOST
+  ? ': no host was chosen, and nothing answers at the default · choose one: --host <url>, or ATELIER_HOST=<url> for every call' : ''}`;
 
 /* Not signed in at a host; with `hint`, the verb that signs in there. */
 export const notSignedIn = (host, { hint = true } = {}) =>
-  `not signed in at ${host}${hint ? ` · atelier login${host === resolveHost() ? '' : ` --host ${host}`}` : ''}`;
+  `not signed in at ${host}${hint ? ` · atelier login${host === defaultHost() ? '' : ` --host ${host}`}` : ''}`;
 
 /* A status the verb did not expect from the host. */
 export const hostAnswered = (host, status) => `the host at ${host} answered ${status}`;
