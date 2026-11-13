@@ -6,8 +6,9 @@
  *                                         primary?, … }], choices: { chats: [{ id, name }], … } }: `exposures` where each
  *                                         may be asked from; `choices.chats` the chats one may be shared with, those the
  *                                         person is in with an agent of their own, never their own 1:1
- *   GET  /api/computers                 { computers: [{ id, label, kind, chat, … }] }: kind `own` the person's own
- *                                         computer, `chat` the 1:1 it serves
+ *   GET  /api/computers                 { computers: [{ id, label, kind, computer, chat, … }] }: `id` the token a
+ *                                         remote names a computer by, `computer` its id, as an agent's `computer` names
+ *                                         it; kind `own` the person's own computer, `chat` the 1:1 it serves
  *   POST /api/agents/<id>/share         { to } → 201: asked from `to` on the owner's word, its connector holding nothing
  *   POST /api/agents/<id>/unshare       { to } → 200
  *   POST /api/agents/<id>/rules         { rules } → 200 { version }: its prompt replaced
@@ -32,24 +33,27 @@ export async function listedAt(host, fail) {
 /* The agents the person has at `host`: { id, name, computer, exposures, primary?, … } each. */
 export const agentsAt = async (host, fail) => (await listedAt(host, fail)).agents;
 
-/* The person's own computers at `host`, each { id, label, chat }: `chat` their own 1:1, the one it serves. */
-export async function ownAt(host, fail) {
+/* The person's computers at `host` as the host lists them, each { computer, label, kind, chat, … }. */
+export async function computersAt(host, fail) {
   const listed = hostAnswer(await askHost(host, 'GET', COMPUTERS_PATH, { session: sessionAt(host, fail).session }), host, fail);
-  return (Array.isArray(listed.computers) ? listed.computers : []).filter((c) => c?.kind === 'own' && typeof c.id === 'string' && typeof c.chat === 'string');
+  return (Array.isArray(listed.computers) ? listed.computers : []).filter((c) => c && typeof c.computer === 'string');
 }
+
+/* The 1:1 a computer serves when it is the person's own; null for every other computer. */
+const ownChatIn = (computer) => (computer?.kind === 'own' && typeof computer.chat === 'string' ? computer.chat : null);
 
 /* The person's own 1:1 an agent may be asked from by default: the one its own computer serves, when the agent lives
  * there; null when it lives on a computer that is not theirs. */
-export const ownChatOf = (own, agent) => own.find((c) => c.id === agent.computer)?.chat ?? null;
+export const ownChatOf = (computers, agent) => ownChatIn(computers.find((c) => c.computer === agent.computer));
 
 /* Where an agent may be asked from, each { id, name }: the person's own 1:1 named as such, every other place by the name
  * the host gives it. */
-export const placesOf = (own, agent) => (Array.isArray(agent.exposures) ? agent.exposures : [])
-  .map((x) => ({ id: x?.to, name: own.some((c) => c.chat === x?.to) ? YOUR_ONE_TO_ONE : x?.name }))
+export const placesOf = (computers, agent) => (Array.isArray(agent.exposures) ? agent.exposures : [])
+  .map((x) => ({ id: x?.to, name: computers.some((c) => ownChatIn(c) === x?.to) ? YOUR_ONE_TO_ONE : x?.name }))
   .filter((p) => typeof p.id === 'string' && typeof p.name === 'string' && p.name);
 
 /* The same in words, as atelier agents says them. */
-export const askedFrom = (own, agent) => placesOf(own, agent).map((p) => p.name);
+export const askedFrom = (computers, agent) => placesOf(computers, agent).map((p) => p.name);
 
 /* The one of `list` that `word` names, by its id or its name, `what` saying what it is ("agent", "chat"); `none()` fails
  * when nothing is named so, and two of one name are refused, named by their ids. */

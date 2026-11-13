@@ -24,7 +24,7 @@ import { resolveHost } from './session.js';
 import { failer, inSandbox } from './ops.js';
 import { readArgs, helpOf, HOST } from './args.js';
 import { folderFor } from './agent-folder.js';
-import { listedAt, ownAt, ownChatOf, placesOf, oneNamed, agentAnswer, sharedLine, YOUR_ONE_TO_ONE } from './agent-host.js';
+import { listedAt, computersAt, ownChatOf, placesOf, oneNamed, agentAnswer, sharedLine, YOUR_ONE_TO_ONE } from './agent-host.js';
 
 const USAGES = {
   share: 'atelier agent share <name> [<chat>]',
@@ -63,8 +63,8 @@ if (sub === 'rules') {
   await agentAnswer(host, fail, agent, 'delete');
   say(`agent ${agent.name}`, 'deleted: nobody may ask it, its prompt is gone', folder && `${theFolder} stays on this machine`);
 } else {
-  const own = await ownAt(host, fail), places = placesOf(own, agent);
-  const { to, where } = chat === undefined || chat === YOUR_ONE_TO_ONE ? ownOne(own) : named(sharing ? chats : places);
+  const computers = await computersAt(host, fail), places = placesOf(computers, agent);
+  const { to, where } = chat === undefined || chat === YOUR_ONE_TO_ONE ? ownOne(computers) : named(sharing ? chats : places);
   if ((Array.isArray(agent.exposures) ? agent.exposures : []).some((x) => x?.to === to) === sharing) say(`agent ${agent.name}`, `${sharing ? 'already' : 'not'} shared with ${where}: nothing changed`);
   else {
     await agentAnswer(host, fail, agent, sub, { to });
@@ -73,8 +73,8 @@ if (sub === 'rules') {
 }
 
 /* No chat named: the person's own 1:1, the one the agent's own computer serves. */
-function ownOne(own) {
-  const to = ownChatOf(own, agent);
+function ownOne(computers) {
+  const to = ownChatOf(computers, agent);
   if (!to) fail(`${agent.name} lives on ${agent.computerName ?? agent.computer}, not your own computer: name the chat · atelier agent ${sub} ${agent.name} <chat>`);
   return { to, where: YOUR_ONE_TO_ONE };
 }

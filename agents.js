@@ -20,7 +20,7 @@ import { resolveHost } from './session.js';
 import { failer, inSandbox } from './ops.js';
 import { readArgs, HOST } from './args.js';
 import { folderFor } from './agent-folder.js';
-import { agentsAt, ownAt, askedFrom } from './agent-host.js';
+import { agentsAt, computersAt, askedFrom } from './agent-host.js';
 
 const fail = failer('agents');
 const { opts } = readArgs(process.argv.slice(2), { usage: 'atelier agents [--host <url>]', options: [HOST] }, fail);
@@ -29,11 +29,11 @@ if (inSandbox()) fail('inside a sandbox the agents are the fleet\'s: atelier age
 const host = resolveHost(opts.host);
 const list = await agentsAt(host, fail);
 if (!list.length) { console.log('\n  no agents yet\n'); process.exit(0); }
-const own = await ownAt(host, fail);
+const computers = await computersAt(host, fail);
 const width = Math.max(...list.map((a) => a.name.length)) + 3;
 console.log('');
 for (const a of list) {
-  const from = askedFrom(own, a);
+  const from = askedFrom(computers, a);
   const folder = folderFor(process.cwd(), host, a);
   const said = [a.primary === true && 'primary of your 1:1', `asked from ${from.length ? from.join(', ') : 'nowhere'}`, folder && `folder ${folder}`];
   console.log(`  ${a.name.padEnd(width)}${said.filter(Boolean).join(' · ')}`);

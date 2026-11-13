@@ -31,10 +31,11 @@ const ON_MY_WORD = 'on my word'
 const OWN = { computer: 'computer:k1', label: 'k1', chat: 'chat:0a1b2c', name: 'Alex' }
 const TESIS = { computer: 'computer:k2', label: 'tesis', chat: 'chat:7e4a51', name: 'Tesis' }
 const LAB = { chat: 'chat:5d6e7f', name: 'Lab' }
-const COMPUTERS = [
-  { id: OWN.computer, label: OWN.label, kind: 'own', with: null, chat: OWN.chat, chatName: OWN.name, direct: 'person:7f3a2c', line: 'your own', modules: [] },
-  { id: TESIS.computer, label: TESIS.label, kind: 'room', with: null, chat: TESIS.chat, chatName: TESIS.name, direct: null, line: 'a room of example-co', modules: [] },
-]
+/* One computer as core's services/portal/push.ts answers GET /api/computers: `id` its token, the word a remote names it
+ * by, and `computer` its id, the one an agent of GET /api/agents names its computer by. */
+const computerOf = ({ computer, label, chat, name }, kind, line, direct = null) => ({ id: computer.slice('computer:'.length), label, kind, line, modules: [],
+  computer, company: null, chat, chatName: name, direct })
+const COMPUTERS = [computerOf(OWN, 'own', 'your own', 'person:7f3a2c'), computerOf(TESIS, 'room', 'a room you are in')]
 /* What the Agents page offers to share with: the chats with a computer that are not the person's own 1:1. */
 const CHOICES = { tools: [], apps: [], chats: [{ id: TESIS.chat, name: TESIS.name }, { id: LAB.chat, name: LAB.name }], companies: [], people: [] }
 const NAMES = { [OWN.chat]: OWN.name, [TESIS.chat]: TESIS.name, [LAB.chat]: LAB.name }

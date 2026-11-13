@@ -41,7 +41,7 @@ import { resolveHost } from './session.js';
 import { readArgs, helpOf, HOST } from './args.js';
 import { AGENT_NAME_CHARS, AGENT_DESCRIPTION_CHARS, AGENT_MODEL_CHARS } from './limits.js';
 import { NAMING_FILE, SETTINGS_FILE, definitionOf, oneLine, notFree, layOut } from './agent-folder.js';
-import { agentsAt, ownAt, ownChatOf, agentAnswer, sharedLine, thrown, YOUR_ONE_TO_ONE } from './agent-host.js';
+import { agentsAt, computersAt, ownChatOf, agentAnswer, sharedLine, thrown, YOUR_ONE_TO_ONE } from './agent-host.js';
 
 const AGENT_NAME = new RegExp(`^[a-z][a-z0-9-]{0,${AGENT_NAME_CHARS - 1}}$`);
 const SPEC = {
@@ -106,7 +106,7 @@ async function shareAtBirth(made) {
     return false;
   };
   try {
-    const chat = ownChatOf(await ownAt(where.host, thrown), made);
+    const chat = ownChatOf(await computersAt(where.host, thrown), made);
     if (!chat) {
       console.log(`agent ${name} lives on ${made.computerName ?? made.computer}, not your own computer: shared with no chat yet · atelier agent share ${name} <chat>`);
       return true;
