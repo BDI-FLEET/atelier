@@ -18,6 +18,8 @@
 // { kind: 'chat', chat, name } (mounted to a chat they are in); for an agent's tool call: { persona, name, sandbox, chat }.
 // Only the computer reaches this socket (it lives in the computer's own folder for the sandbox), so the header is its
 // word; it is taken off before the module sees the request.
+// req.user: the same caller in the shape an app written for the old host reads, { id, name } of a person (id = person,
+// name = name); null when no person calls (nobody, or an agent: its caller names no person).
 // ctx.call: on an agent's tool call, the call's id from the X-Atelier-Call header, the same when the computer hands the
 // call again (its answer lost on the way back), so `run` can do a call's work once; null on any other request. Taken
 // off the request as the caller's header is.
@@ -147,6 +149,9 @@ const requestStore = new AsyncLocalStorage();
 const prefix = `/api/${o.workspace}/${o.id}`;
 const router = createRouter();
 
+/** req.user, made of the same caller ctx.caller is: { id, name } of a person, null for an agent or for nobody. */
+const userOf = (caller) => typeof caller?.person === 'string' && caller.person ? { id: caller.person, name: typeof caller.name === 'string' ? caller.name : '' } : null;
+
 /** Who calls and, on a tool call, the call's id: both headers taken off the request. */
 function askedOf(req) {
   const raw = req.headers[CALLER_HEADER], call = req.headers[CALL_HEADER];
@@ -189,7 +194,7 @@ async function handle(req, res) {
   if (p === `${prefix}/tools` || p.startsWith(`${prefix}/tools/`)) {
     if (await toolRequest(req, res, p, asked)) return;
   }
-  req.user = null;
+  req.user = userOf(caller);
   req.caller = caller;
   if (await router.handle(req, res, (fn) => requestStore.run({ caller, call: null }, fn))) return;
   res.writeHead(404, { 'Content-Type': 'text/plain' });

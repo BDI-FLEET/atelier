@@ -1,0 +1,2 @@
+{ "name": "Shopping list", "icon": "shopping-cart", "deploy": "node migrate.js", "test": "node test.js",
+  "smoke": "curl -sf --unix-socket \"$ATELIER_SOCK\" \"$BASE_URL/items\" >/dev/null", "healthz": "/items" }
