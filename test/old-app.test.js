@@ -142,6 +142,9 @@ import {
 } from './lib'
 import { ok } from './ok.js'
 // import { gone } from './gone'
+/*
+import { old } from './db'
+*/
 const require = createRequire(import.meta.url)
 const db = require('./db')
 export default { mountRoutes(router) { router.get('/x', (q, s) => s.json({ open: open(), rows: rows(), ok })) } }

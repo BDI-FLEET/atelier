@@ -1,12 +1,14 @@
 // The relative imports of a module's backend that Node does not find as they are written: a name without its extension
 // (`./db` for db.js) or a folder (`./lib` for lib/index.js). A bundler found them; Node imports the backend as it is and
 // ends at the first one. Read from backend.js and the files it imports by a relative path, transitively, by their
-// static import and export lines, without running any of them. An import is named only when the file it means is
-// there, so the sentence can say what to write; a `require` (createRequire finds `./db`) is never one.
+// static import and export lines outside comments, without running any of them. An import is named only when the file
+// it means is there, so the sentence can say what to write; a `require` (createRequire finds `./db`) is never one.
 import fs from 'node:fs';
 import path from 'node:path';
 import { BACKEND_FILE } from './module-json.js';
 
+/** A block comment, blanked before the lines are read, its lines kept so a line's number stays the file's. */
+const BLOCK_COMMENT = /\/\*[\s\S]*?\*\//g;
 const STATIC_IMPORT = /^[ \t]*(?:import|export)\s+(?:[^'";]*?\s+from\s+)?['"](\.\.?\/[^'"]+)['"]/gm;
 /** What Node would need written after an import's name to find the file the old host's bundler found. */
 const ANSWERS = ['.js', '.mjs', '/index.js', '/index.mjs'];
@@ -21,7 +23,7 @@ export function unfoundImports(dir) {
     if (seen.has(abs)) return;
     seen.add(abs);
     let src;
-    try { src = fs.readFileSync(abs, 'utf8'); } catch { return; }
+    try { src = fs.readFileSync(abs, 'utf8').replace(BLOCK_COMMENT, (c) => c.replace(/[^\n]/g, ' ')); } catch { return; }
     for (const m of src.matchAll(STATIC_IMPORT)) {
       const spec = m[1], target = path.resolve(path.dirname(abs), spec);
       if (!ours(target)) continue;

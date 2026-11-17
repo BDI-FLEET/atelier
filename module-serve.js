@@ -35,9 +35,9 @@
 // it does not parse. A request without that header, or from another site or another app's origin, is refused as before;
 // a form and multipart always are.
 //
-// Before the backend is imported, its relative imports Node does not find as written (`./db` for db.js, `./lib` for
-// lib/index.js: what the old host's bundler found) end the process, each said by file and line with what to write
-// (backend-imports.js), rather than Node's first error alone.
+// A backend Node cannot import because a relative import names no file as written (`./db` for db.js, `./lib` for
+// lib/index.js: what the old host's bundler found) ends the process with each such import said by file and line with
+// what to write (backend-imports.js), rather than Node's first error alone.
 // The module runs in this process: an uncaught throw or a rejection ends it, so a crash is only its own; the computer
 // starts it again. A later push replaces the module's folder and the computer starts it again: no hot reload here.
 // ctx.broadcast: the events are written to stdout as one JSON line each (`broadcast {…}`), for the computer to carry.
@@ -292,13 +292,15 @@ await buildFrontend();
 let teardown = null;
 const backend = path.join(o.dir, BACKEND_FILE);
 if (fs.existsSync(backend)) {
-  const unfound = unfoundImports(o.dir);
-  if (unfound.length) {
+  let mod;
+  try { mod = await import(pathToFileURL(backend).href); }
+  catch (err) {
+    const unfound = err?.code === 'ERR_MODULE_NOT_FOUND' ? unfoundImports(o.dir) : [];
+    if (!unfound.length) throw err;
     console.error(`module-serve · ${qid} · ${BACKEND_FILE} imports what Node does not find as written, so its process ended:`);
     for (const u of unfound) console.error(`  ${unfoundSaid(u)}`);
     process.exit(1);
   }
-  const mod = await import(pathToFileURL(backend).href);
   const plug = mod.default;
   if (!plug?.mountRoutes) { console.error(`module-serve · ${qid} · backend.js has no default.mountRoutes export`); process.exit(1); }
   fs.mkdirSync(o.data, { recursive: true });
