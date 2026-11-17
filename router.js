@@ -1,10 +1,13 @@
 /* atelier · the router a module's backend is given, the same in the shell (server.js), in a backend's own process
  * (backend-host.js) and in a computer's serving sandbox (module-serve.js).
  *
- * A module mounts at `/api/<ws>/<id>`: `scope(prefix)` hands it get/post/put/delete/patch taking paths relative to
- * that prefix (`/spaces`, `''` or `/` for the prefix itself), with `:name` params. First match wins. A handler gets
- * `req.params`, `req.query`, `req.json()` (read once, shared by every reader of the request) and
- * `res.json(data, status?)`; a throw answers its `statusCode` (else 500) with `{ error }`.
+ * A module mounts at `/api/<ws>/<id>`: `scope(prefix)` hands it get/post/put/delete/patch/head/options, and `all` for
+ * any method, taking paths relative to that prefix (`/spaces`, `''` or `/` for the prefix itself), with `:name` params
+ * and a trailing `/*` whose rest of the path is `req.params['*']` (the bare parent too, its rest ''); each returns the
+ * router, so calls chain. A HEAD is answered by a GET route when no HEAD route comes first. First match wins. A path
+ * whose params do not decode is answered 400. A handler gets `req.params`, `req.query`, `req.json()` (read once, shared
+ * by every reader of the request) and `res.json(data, status?)`; a throw answers its `statusCode` (else 500) with
+ * `{ error }`.
  */
 
 import { MAX_JSON_BODY } from './limits.js';
@@ -70,15 +73,21 @@ export function readJsonBody(req) {
 /** The body, read once: the gate's `authorize` and the module's handler share one parse. */
 export const bodyOf = (req) => (req.__bodyPromise ??= readJsonBody(req));
 
+const WILDCARD = '/*';
+
 function compile(pattern) {
   const paramNames = [];
-  const re = new RegExp('^' + pattern
+  const rest = pattern.endsWith(WILDCARD);
+  const re = new RegExp('^' + (rest ? pattern.slice(0, -WILDCARD.length) : pattern)
     .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    .replace(/:([a-zA-Z_]\w*)/g, (_, n) => { paramNames.push(n); return '([^/]+)'; }) + '$');
+    .replace(/:([a-zA-Z_]\w*)/g, (_, n) => { paramNames.push(n); return '([^/]+)'; }) + (rest ? '(?:/(.*))?' : '') + '$');
+  if (rest) paramNames.push('*');
   return { re, paramNames };
 }
 
-const METHODS = ['get', 'post', 'put', 'delete', 'patch'];
+const METHODS = ['get', 'post', 'put', 'delete', 'patch', 'head', 'options'];
+const ANY = 'ALL';
+const answers = (route, method) => route.method === method || route.method === ANY || (method === 'HEAD' && route.method === 'GET');
 
 export function createRouter() {
   const routes = [];
@@ -87,11 +96,14 @@ export function createRouter() {
   function scope(prefix) {
     const mine = [];
     const join = (p) => (!p || p === '/') ? prefix : prefix + (p.startsWith('/') ? p : '/' + p);
-    const s = Object.fromEntries(METHODS.map((m) => [m, (p, handler) => {
-      const entry = { method: m.toUpperCase(), ...compile(join(p)), handler };
+    const add = (method) => (p, handler) => {
+      const entry = { method, ...compile(join(p)), handler };
       routes.push(entry);
       mine.push(entry);
-    }]));
+      return s;
+    };
+    const s = Object.fromEntries(METHODS.map((m) => [m, add(m.toUpperCase())]));
+    s.all = add(ANY);
     s._dispose = () => {
       for (const e of mine) { const i = routes.indexOf(e); if (i >= 0) routes.splice(i, 1); }
       mine.length = 0;
@@ -103,10 +115,15 @@ export function createRouter() {
   async function handle(req, res, run = (fn) => fn()) {
     const url = new URL(req.url, 'http://localhost');
     for (const r of routes) {
-      if (r.method !== req.method) continue;
+      if (!answers(r, req.method)) continue;
       const m = r.re.exec(url.pathname);
       if (!m) continue;
-      req.params = Object.fromEntries(r.paramNames.map((n, i) => [n, decodeURIComponent(m[i + 1])]));
+      try { req.params = Object.fromEntries(r.paramNames.map((n, i) => [n, decodeURIComponent(m[i + 1] ?? '')])); }
+      catch {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'the path does not decode' }));
+        return true;
+      }
       req.query = Object.fromEntries(url.searchParams.entries());
       req.json = () => bodyOf(req);
       res.json = (data, code = 200) => {

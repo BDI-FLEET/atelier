@@ -11,7 +11,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { startServer } from './helpers.js'
-import { CALLER_HEADER, CALL_HEADER } from '../router.js'
+import { Readable } from 'node:stream'
+import { CALLER_HEADER, CALL_HEADER, createRouter } from '../router.js'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const MODULE_SERVE = path.resolve(HERE, '..', 'module-serve.js')
@@ -117,4 +118,68 @@ test("what a serving sandbox offers names its tools, its teaching and the config
   } finally {
     sandbox.stop()
   }
+})
+
+// the old host's router (its spike's matrix, ported): every method, all(), a trailing /* whose rest is req.params['*'] (the
+// bare parent too), HEAD served by the GET route, first match wins, and a bad path encoding a 400 the router answers
+const fakeReq = (method, url) => Object.assign(Readable.from([]), { method, url, headers: {} })
+function fakeRes() {
+  const res = { status: null, body: '', writableEnded: false }
+  res.writeHead = (s) => { res.status = s }
+  res.end = (b = '') => { res.body += b; res.writableEnded = true }
+  return res
+}
+
+test("the router an app is given has head, options and all, a trailing /* whose rest is req.params['*'], HEAD served by the GET route, the first match winning, as the old host's did", async () => {
+  const r = createRouter()
+  const api = r.scope('/api/global/m')
+  const h = (tag) => (req, res) => res.json({ tag, method: req.method, params: req.params })
+  const chained = api.get('', h('root'))
+  assert.equal(chained, api, 'each method returns the router, as the old one did')
+  api.get('/items/:id', h('item'))
+  api.get('/s/:id/space.js', h('spacejs'))
+  api.get('/s/:id/api/*', h('spaceapi'))
+  api.get('/s/:id/*', h('spacestatic'))
+  api.options('/*', h('cors'))
+  api.post('/upload', h('upload'))
+  api.head('/probe', h('probe'))
+  api.get('/star*name', h('literal'))
+  api.all('/*', h('catchall'))
+  const t = async (method, p, tag, params) => {
+    const res = fakeRes()
+    assert.equal(await r.handle(fakeReq(method, `/api/global/m${p}`), res), true, `${method} ${p}: no match`)
+    const got = JSON.parse(res.body)
+    assert.equal(got.tag, tag, `${method} ${p}`)
+    if (params) assert.deepEqual(got.params, params, `${method} ${p}`)
+  }
+  await t('GET', '', 'root')
+  await t('HEAD', '', 'root')
+  await t('GET', '/items/42', 'item', { id: '42' })
+  await t('GET', '/items/a%2Fb', 'item', { id: 'a/b' })
+  await t('GET', '/s/abc/space.js', 'spacejs', { id: 'abc' })
+  await t('GET', '/s/abc/api/db/query', 'spaceapi', { id: 'abc', '*': 'db/query' })
+  await t('GET', '/s/abc/api', 'spaceapi', { id: 'abc', '*': '' })
+  await t('GET', '/s/abc', 'spacestatic', { id: 'abc', '*': '' })
+  await t('GET', '/s/abc/', 'spacestatic', { id: 'abc', '*': '' })
+  await t('GET', '/s/abc/deep/er/still/index.html', 'spacestatic', { id: 'abc', '*': 'deep/er/still/index.html' })
+  await t('OPTIONS', '/anything/at/all', 'cors', { '*': 'anything/at/all' })
+  await t('POST', '/upload', 'upload')
+  await t('HEAD', '/probe', 'probe')
+  await t('GET', '/probe', 'catchall', { '*': 'probe' })
+  await t('GET', '/star*name', 'literal')
+  await t('GET', '/starXname', 'catchall', { '*': 'starXname' })
+  await t('PUT', '/whatever/deep', 'catchall', { '*': 'whatever/deep' })
+  await t('PROPFIND', '/dav/x', 'catchall')
+  await t('DELETE', '', 'catchall', { '*': '' })
+  await t('GET', '/items', 'catchall')
+  const only = createRouter()
+  only.scope('/api/global/m').get('/only', h('only'))
+  assert.equal(await only.handle(fakeReq('GET', '/api/global/m/nope'), fakeRes()), false)
+  assert.equal(await only.handle(fakeReq('POST', '/api/global/m/only'), fakeRes()), false)
+  const bad = fakeRes()
+  assert.equal(await only.handle(fakeReq('GET', '/api/global/m/only'), fakeRes()), true)
+  const r2 = createRouter()
+  r2.scope('/api/global/m').get('/items/:id', h('item'))
+  assert.equal(await r2.handle(fakeReq('GET', '/api/global/m/items/%E0%A4%A'), bad), true)
+  assert.equal(bad.status, 400)
 })

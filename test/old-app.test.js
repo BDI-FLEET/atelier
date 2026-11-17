@@ -62,3 +62,17 @@ test("req.user is { id, name } of the person ctx.caller names, null with no call
     app.stop()
   }
 })
+
+test("its routes by options, all and a trailing /* answer, and a HEAD is answered by its GET route without a body", async () => {
+  const app = await serve()
+  try {
+    assert.deepEqual((await app.request('GET', `${API}/files/a/b%20c.txt`)).json(), { path: 'a/b c.txt' })
+    assert.deepEqual((await app.request('DELETE', `${API}/ping`, { 'content-type': 'application/json' })).json(), { method: 'DELETE' })
+    const pre = await app.request('OPTIONS', `${API}/items`)
+    assert.deepEqual([pre.status, pre.headers['access-control-allow-methods']], [204, 'GET, POST'])
+    const head = await app.request('HEAD', `${API}/items`)
+    assert.deepEqual([head.status, head.headers['content-type'], head.text], [200, 'application/json', ''])
+  } finally {
+    app.stop()
+  }
+})

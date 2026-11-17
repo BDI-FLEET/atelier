@@ -14,5 +14,8 @@ export default {
       res.json({ ok: true })
     })
     router.get('/me', (req, res) => res.json({ user: req.user, caller: ctx.caller }))
+    router.get('/files/*', (req, res) => res.json({ path: req.params['*'] }))
+      .all('/ping', (req, res) => res.json({ method: req.method }))
+    router.options('/*', (req, res) => { res.writeHead(204, { 'access-control-allow-methods': 'GET, POST' }); res.end() })
   },
 }
