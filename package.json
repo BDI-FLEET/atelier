@@ -55,6 +55,7 @@
     "backend-host.js",
     "backend-procs.js",
     "module-serve.js",
+    "backend-imports.js",
     "router.js",
     "limits.js",
     "frame.jsx",

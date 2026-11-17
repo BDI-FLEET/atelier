@@ -9,6 +9,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { CALLER_HEADER } from '../router.js'
+import { unfoundImports, unfoundSaid } from '../backend-imports.js'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const MODULE_SERVE = path.resolve(HERE, '..', 'module-serve.js')
@@ -127,5 +128,57 @@ test("a write from the app's own page whose body is JSON without saying so (text
     assert.equal((await app.request('GET', `${API}/items`)).json().length, 2)
   } finally {
     app.stop()
+  }
+})
+
+// a backend as the old host's bundler took it: imports without their extension, of a folder, beside the ones Node finds
+function bundledBackend() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'atelier-old-backend-'))
+  const write = (f, text) => { fs.mkdirSync(path.dirname(path.join(dir, f)), { recursive: true }); fs.writeFileSync(path.join(dir, f), text) }
+  write('backend.js', `import { createRequire } from 'node:module'
+import { open } from './db'
+import {
+  rows,
+} from './lib'
+import { ok } from './ok.js'
+// import { gone } from './gone'
+const require = createRequire(import.meta.url)
+const db = require('./db')
+export default { mountRoutes(router) { router.get('/x', (q, s) => s.json({ open: open(), rows: rows(), ok })) } }
+`)
+  write('db.js', 'export const open = () => true\n')
+  write('ok.js', 'export const ok = 1\n')
+  write('lib/index.js', "export { rows } from './rows'\n")
+  write('lib/rows.mjs', 'export const rows = () => []\n')
+  write('node_modules/pkg/index.js', "import './inner'\n")
+  return dir
+}
+
+test("each import of the backend Node does not find as written is named by file and line with what to write, a folder's by its index, transitively; a require, a comment and a full name are not", () => {
+  const dir = bundledBackend()
+  try {
+    assert.deepEqual(unfoundImports(dir), [
+      { file: 'backend.js', line: 2, spec: './db', fix: './db.js' },
+      { file: 'backend.js', line: 3, spec: './lib', fix: './lib/index.js' },
+      { file: 'lib/index.js', line: 1, spec: './rows', fix: './rows.mjs' },
+    ])
+    assert.equal(unfoundSaid(unfoundImports(dir)[1]), "backend.js:3 imports './lib', which Node does not find as written: write './lib/index.js'")
+    assert.deepEqual(unfoundImports(OLD_APP), [])
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test("a backend with such an import does not start: its process ends at once, each import said by file and line with what to write", async () => {
+  const dir = bundledBackend()
+  try {
+    await assert.rejects(serve(dir), (err) => {
+      assert.match(err.message, /module-serve ended/)
+      assert.match(err.message, /backend\.js:2 imports '\.\/db', which Node does not find as written: write '\.\/db\.js'/)
+      assert.match(err.message, /lib\/index\.js:1 imports '\.\/rows'.*write '\.\/rows\.mjs'/)
+      return true
+    })
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
   }
 })
