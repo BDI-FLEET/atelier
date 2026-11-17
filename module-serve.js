@@ -29,7 +29,11 @@
 // off the request as the caller's header is.
 // req.json(): a body is read as JSON only when the request says it is JSON (content-type application/json); any other
 // body is refused 415. And a body of the three kinds any page may send another origin without asking first (text/plain, a
-// form, multipart) is refused 415 before any route runs: a write from another page never reaches a handler.
+// form, multipart) is refused 415 before any route runs: a write from another page never reaches a handler. One
+// exception, for the apps written for the old host, which read a fetch's JSON whatever it said: a text/plain or untyped
+// body the browser says the app's own page sent (sec-fetch-site: same-origin, exactly) is read as JSON, refused 415 when
+// it does not parse. A request without that header, or from another site or another app's origin, is refused as before;
+// a form and multipart always are.
 //
 // The module runs in this process: an uncaught throw or a rejection ends it, so a crash is only its own; the computer
 // starts it again. A later push replaces the module's folder and the computer starts it again: no hot reload here.
@@ -56,7 +60,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { pathToFileURL } from 'node:url';
 import { getJsx } from './build.js';
 import { readModuleJson, TOOL_NAME, BACKEND_FILE, FRONTEND_FILE } from './module-json.js';
-import { createRouter, readJsonBody, headerObject, CALLER_HEADER, CALL_HEADER, MODULE_ID } from './router.js';
+import { createRouter, readJsonBody, headerObject, CALLER_HEADER, CALL_HEADER, MODULE_ID, UNTYPED } from './router.js';
 import { MAX_HEADER_BYTES, STOP_FLUSH_MS, TEACHING_CHARS } from './limits.js';
 
 function args(argv) {
@@ -167,7 +171,9 @@ async function buildFrontend() {
 // ---- the router: the one a local instance gives a module ----
 const requestStore = new AsyncLocalStorage();
 const prefix = `/api/${o.workspace}/${o.id}`;
-const router = createRouter();
+/** A request the browser says the page of this same origin sent (sec-fetch-site, a header no page can set): the app's own frame. */
+const fromOwnPage = (req) => req.headers['sec-fetch-site'] === 'same-origin';
+const router = createRouter({ untyped: fromOwnPage });
 
 /** req.user, made of the same caller ctx.caller is: { id, name } of a person, null for an agent or for nobody. */
 const userOf = (caller) => typeof caller?.person === 'string' && caller.person ? { id: caller.person, name: typeof caller.name === 'string' ? caller.name : '' } : null;
@@ -195,7 +201,8 @@ Object.defineProperty(ctx, 'call', { enumerable: true, get: () => requestStore.g
 const SIMPLE = /^(text\/plain|application\/x-www-form-urlencoded|multipart\/form-data)\b/i;
 async function handle(req, res) {
   const asked = askedOf(req), { caller } = asked;
-  if (req.method !== 'GET' && req.method !== 'HEAD' && SIMPLE.test(String(req.headers['content-type'] ?? ''))) {
+  const type = String(req.headers['content-type'] ?? '');
+  if (req.method !== 'GET' && req.method !== 'HEAD' && SIMPLE.test(type) && !(fromOwnPage(req) && UNTYPED.test(type))) {
     req.resume();
     res.writeHead(415, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'the body is JSON: content-type application/json' }));

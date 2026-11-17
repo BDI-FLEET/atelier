@@ -35,17 +35,24 @@ export function headerObject(raw) {
 
 const status = (message, statusCode) => Object.assign(new Error(message), { statusCode });
 
+/** A body that says it is text/plain, or says nothing: what a page's fetch sends a JSON text as when it names no type. */
+export const UNTYPED = /^(?:text\/plain\b|$)/i;
+
 /**
  * The request's body as JSON. A body is JSON only when the request says so (content-type application/json): any
- * other body is refused 415, so a text/plain or form body another page sent is never data for a handler. Past
- * MAX_JSON_BODY it is refused 413 and the rest is not kept. No body reads as {}.
+ * other body is refused 415, so a text/plain or form body another page sent is never data for a handler. `untyped`:
+ * the caller has established that the request came from the module's own page, and a text/plain or untyped body is
+ * read as JSON too, refused 415 when it does not parse. Past MAX_JSON_BODY it is refused 413 and the rest is not kept.
+ * No body reads as {}.
  */
-export function readJsonBody(req) {
+export function readJsonBody(req, { untyped = false } = {}) {
   return new Promise((resolve, reject) => {
     const hasBody = req.headers['content-length'] !== '0' && (req.headers['content-length'] || req.headers['transfer-encoding']);
-    if (hasBody && !/^application\/json\b/i.test(String(req.headers['content-type'] ?? ''))) {
+    const type = String(req.headers['content-type'] ?? ''), said = /^application\/json\b/i.test(type);
+    const notJson = () => status('the body is JSON: content-type application/json', 415);
+    if (hasBody && !said && !(untyped && UNTYPED.test(type))) {
       req.resume();
-      reject(status('the body is JSON: content-type application/json', 415));
+      reject(notJson());
       return;
     }
     let body = '';
@@ -64,14 +71,14 @@ export function readJsonBody(req) {
     req.on('end', () => {
       if (over) return;
       if (!body) return resolve({});
-      try { resolve(JSON.parse(body)); } catch (e) { reject(e); }
+      try { resolve(JSON.parse(body)); } catch (e) { reject(said ? e : notJson()); }
     });
     req.on('error', reject);
   });
 }
 
 /** The body, read once: the gate's `authorize` and the module's handler share one parse. */
-export const bodyOf = (req) => (req.__bodyPromise ??= readJsonBody(req));
+export const bodyOf = (req, untyped = false) => (req.__bodyPromise ??= readJsonBody(req, { untyped }));
 
 const WILDCARD = '/*';
 
@@ -89,7 +96,8 @@ const METHODS = ['get', 'post', 'put', 'delete', 'patch', 'head', 'options'];
 const ANY = 'ALL';
 const answers = (route, method) => route.method === method || route.method === ANY || (method === 'HEAD' && route.method === 'GET');
 
-export function createRouter() {
+/** `untyped(req)`: whether a request's text/plain or untyped body is read as JSON (readJsonBody); never, unless given. */
+export function createRouter({ untyped = () => false } = {}) {
   const routes = [];
 
   /** The routes of one module, under `prefix`; `_dispose()` takes them out again (a hot swap). */
@@ -125,7 +133,7 @@ export function createRouter() {
         return true;
       }
       req.query = Object.fromEntries(url.searchParams.entries());
-      req.json = () => bodyOf(req);
+      req.json = () => bodyOf(req, untyped(req));
       res.json = (data, code = 200) => {
         res.writeHead(code, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(data));

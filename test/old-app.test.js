@@ -104,3 +104,28 @@ test("a relative import without its extension is served: a file as the file it n
     app.stop()
   }
 })
+
+test("a write from the app's own page whose body is JSON without saying so (text/plain, or no content type) is read by req.json(), as the old host read it; from anywhere else, or a form, or a body that is not JSON, it is refused 415 before any route runs", async () => {
+  const app = await serve()
+  const post = (headers, body = '{"text":"eggs"}') => app.request('POST', `${API}/items`, { ...asCaller(person), ...headers }, body)
+  const own = { 'sec-fetch-site': 'same-origin' }
+  try {
+    assert.equal((await post({ ...own, 'content-type': 'text/plain;charset=UTF-8' })).status, 200)
+    assert.equal((await post(own)).status, 200)
+    assert.deepEqual((await app.request('GET', `${API}/items`)).json().map(({ text, by }) => ({ text, by })), [{ text: 'eggs', by: 'Ana' }, { text: 'eggs', by: 'Ana' }])
+    const refused = {
+      'another site': { 'sec-fetch-site': 'cross-site', 'content-type': 'text/plain' },
+      'another app of the same site': { 'sec-fetch-site': 'same-site', 'content-type': 'text/plain' },
+      'a page the browser does not name': { 'content-type': 'text/plain' },
+      'an Origin and no sec-fetch-site': { origin: 'https://m-x.frames.example', 'content-type': 'text/plain' },
+      'another site, no content type': { 'sec-fetch-site': 'cross-site' },
+      'a form': { ...own, 'content-type': 'application/x-www-form-urlencoded' },
+      'a multipart form': { ...own, 'content-type': 'multipart/form-data; boundary=x' },
+    }
+    for (const [why, headers] of Object.entries(refused)) assert.equal((await post(headers)).status, 415, why)
+    assert.equal((await post({ ...own, 'content-type': 'text/plain' }, 'eggs')).status, 415, 'not JSON')
+    assert.equal((await app.request('GET', `${API}/items`)).json().length, 2)
+  } finally {
+    app.stop()
+  }
+})

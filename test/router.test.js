@@ -19,6 +19,7 @@ const MODULE_SERVE = path.resolve(HERE, '..', 'module-serve.js')
 
 const csv = { 'content-type': 'text/csv' }
 const json = { 'content-type': 'application/json' }
+const ownPlain = { 'content-type': 'text/plain', 'sec-fetch-site': 'same-origin' }
 
 async function viaFetch(url, headers, body) {
   const r = await fetch(url, { method: 'POST', headers, body })
@@ -70,7 +71,7 @@ export default {
   }
 }
 
-test('req.json() reads a body only when it says content-type application/json, else 415, in all three routers', async () => {
+test('req.json() reads a body only when it says content-type application/json, else 415, in all three routers; a serving sandbox alone reads one its own page sent as text/plain', async () => {
   const shell = await startServer(path.join(HERE, 'fixtures', 'ws-basic'))
   const gated = await startServer(path.join(HERE, 'fixtures', 'http-acl'), { ATELIER_AUTH: 'gate' })
   const sandbox = await moduleServe()
@@ -85,6 +86,9 @@ test('req.json() reads a body only when it says content-type application/json, e
       const refused = await post(csv, '{"a":1}')
       assert.equal(refused.status, 415, where)
       assert.match(refused.body.error, /content-type application\/json/, where)
+      // only a serving sandbox reads JSON its own page sent without saying so; the shell and the gate never do
+      const plain = await post(ownPlain, '{"a":1}')
+      assert.equal(plain.status, where === 'a computer\'s serving sandbox' ? 200 : 415, where)
       const read = await post(json, '{"a":1}')
       assert.equal(read.status, 200, where)
       assert.deepEqual(read.body.echoed, { a: 1 }, where)
