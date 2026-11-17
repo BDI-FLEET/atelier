@@ -30,7 +30,9 @@
 // The module runs in this process: an uncaught throw or a rejection ends it, so a crash is only its own; the computer
 // starts it again. A later push replaces the module's folder and the computer starts it again: no hot reload here.
 // ctx.broadcast: the events are written to stdout as one JSON line each (`broadcast {…}`), for the computer to carry.
-// ctx.port and ctx.host are null: the module has no port of its own, only the socket.
+// ctx.port and ctx.host are null: the module has no port of its own, only the socket. ctx.baseUrl is BASE_URL when the
+// computer hands it, else null. ctx.suspendable() does nothing and returns nothing: an app written for the old host
+// declares with it that it may be stopped when idle, and a computer here keeps every module up.
 //
 // Its tools, the calls an agent gets (module.json `agent: { tools, teaching }`: the calls and one page on when to use
 // them): the names module.json declares, each implemented by the backend's `tools(ctx)` export
@@ -167,6 +169,7 @@ const ctx = {
   log: (...a) => console.log(`[${qid}]`, ...a),
   broadcast: (event) => console.log(`broadcast ${JSON.stringify(event || {})}`),
   module: (id) => { if (!slots.has(id)) slots.set(id, {}); return slots.get(id); },
+  suspendable: () => undefined,
 };
 Object.defineProperty(ctx, 'caller', { enumerable: true, get: () => requestStore.getStore()?.caller ?? null });
 Object.defineProperty(ctx, 'call', { enumerable: true, get: () => requestStore.getStore()?.call ?? null });

@@ -76,3 +76,12 @@ test("its routes by options, all and a trailing /* answer, and a HEAD is answere
     app.stop()
   }
 })
+
+test("ctx.suspendable() is a function that returns nothing, as the old host's did: an app that calls it at its start comes up", async () => {
+  const app = await serve()
+  try {
+    assert.deepEqual((await app.request('GET', `${API}/suspendable`)).json(), { returned: 'undefined' })
+  } finally {
+    app.stop()
+  }
+})

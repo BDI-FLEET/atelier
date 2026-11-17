@@ -3,6 +3,8 @@ import path from 'node:path'
 
 export default {
   mountRoutes(router, ctx) {
+    const suspended = ctx.suspendable()
+    router.get('/suspendable', (req, res) => res.json({ returned: suspended === undefined ? 'undefined' : suspended }))
     const file = path.join(ctx.dataDir, 'items.json')
     const read = () => { try { return JSON.parse(fs.readFileSync(file, 'utf8')) } catch { return [] } }
     const write = (items) => fs.writeFileSync(file, JSON.stringify(items))
