@@ -85,3 +85,22 @@ test("ctx.suspendable() is a function that returns nothing, as the old host's di
     app.stop()
   }
 })
+
+test("a relative import without its extension is served: a file as the file it names, a folder by a redirect to its index; two files it could name are neither, and said", async () => {
+  const app = await serve()
+  const at = (p) => app.request('GET', `/modules/global/old-app/${p}`)
+  try {
+    const util = await at('util'), utilJs = await at('util.js')
+    assert.deepEqual([util.status, util.headers['content-type'], util.text], [200, utilJs.headers['content-type'], utilJs.text])
+    const lib = await at('lib')
+    assert.deepEqual([lib.status, lib.headers.location], [302, 'lib/index.js'])
+    assert.equal((await at('lib/index.js')).status, 200)
+    const part = await at('lib/part')
+    assert.deepEqual([part.status, part.text], [200, (await at('lib/part.js')).text])
+    assert.equal((await at('both')).status, 404)
+    assert.match(app.out(), /frontend\.jsx imports \.\/both: both\.js and both\.jsx/)
+    assert.equal((await at('backend')).status, 404)
+  } finally {
+    app.stop()
+  }
+})

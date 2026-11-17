@@ -9,7 +9,11 @@
 //     instance gives (scoped paths, :params, req.json(), res.json(), a teardown it may return);
 //   • its frontend, /modules/<workspace>/<id>/…, built once at the start by build.js: `frontend.js` (from frontend.jsx,
 //     served as .js as a local instance does) and the module's files it imports by a relative path, transitively; and the
-//     files under the module's `assets/` folder. Nothing else of the folder leaves the sandbox: not backend.js, not a
+//     files under the module's `assets/` folder. A relative import without its extension, as an app written for the old
+//     host may write it (`./util`, `./lib`), is served when exactly one file of the module answers it (util.js, util.jsx,
+//     lib/index.js, lib/index.jsx): a file at that name as itself, a folder by a redirect to its index, so the index's
+//     own relative imports read from its folder; two files that could answer it are neither, and said at the start.
+//     Nothing else of the folder leaves the sandbox: not backend.js, not a
 //     backend's helpers (db.js, an import script), not data/ or node_modules/, never a dot or underscore name.
 //     The frame document, React, the chrome's kit and styles are served at the computer's address, not by the module.
 //
@@ -97,6 +101,8 @@ const files = new Map();   // the path after /modules/<ws>/<id>/ → { content, 
 const RAW = { '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
   '.gif': 'image/gif', '.webp': 'image/webp', '.ico': 'image/x-icon', '.txt': 'text/plain; charset=utf-8', '.md': 'text/markdown; charset=utf-8', '.woff2': 'font/woff2' };
 const SKIP = (name) => /^[._-]/.test(name) || name === 'data' || name === 'node_modules';
+/** What an import without its extension may name, after the name it gives. */
+const UNNAMED = ['.js', '.jsx', '/index.js', '/index.jsx'];
 /** A file of the module that may leave the sandbox: inside its folder, no part skipped, not the backend, not data/. */
 function servable(abs) {
   const rel = path.relative(o.dir, abs);
@@ -127,7 +133,19 @@ async function buildFrontend() {
       const base = path.resolve(path.dirname(abs), spec);
       const hit = [base, base.replace(/\.js$/, '.jsx'), `${base}.jsx`, `${base}.js`].find((f) => fs.existsSync(f) && servable(f));
       if (hit) await visit(hit);
+      if (!/\.jsx?$/.test(spec) && !servable(base)) await unnamed(abs, spec, base);
     }
+  };
+  /** An import of `spec` without its extension, from `from`: the one file that answers it served under that name, or why none. */
+  const unnamed = async (from, spec, base) => {
+    const answers = UNNAMED.map((tail) => base + tail).filter(servable);
+    const name = path.relative(o.dir, base).split(path.sep).join('/');
+    if (answers.length > 1) { console.warn(`  ! ${qid}: ${servable(from)} imports ${spec}: ${answers.map(servable).join(' and ')} could each be it, neither is served at ${name}; name the file with its extension`); return; }
+    if (!answers.length || files.has(name)) return;
+    await visit(answers[0]);
+    const served = servable(answers[0]).replace(/\.jsx$/, '.js');
+    if (path.dirname(answers[0]) === path.dirname(base)) files.set(name, files.get(served));
+    else files.set(name, { redirect: `${path.basename(base)}/${path.posix.basename(served)}` });
   };
   if (entry) await visit(entry);
   // assets/: the module's static files, as they are
@@ -190,6 +208,7 @@ async function handle(req, res) {
     try { rel = decodeURIComponent(p.slice(`/modules/${qid}/`.length)); } catch { rel = ''; }
     const f = files.get(rel);
     if (!f) { res.writeHead(404, { 'Content-Type': 'text/plain' }); res.end('Not found'); return; }
+    if (f.redirect) { res.writeHead(302, { Location: f.redirect, 'Cache-Control': 'no-cache' }); res.end(); return; }
     res.writeHead(200, { 'Content-Type': f.contentType, 'Cache-Control': 'no-cache' });
     res.end(f.content);
     return;
