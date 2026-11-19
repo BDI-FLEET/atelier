@@ -60,6 +60,21 @@ async function runCss(srcPath, scanSources, scanBase) {
   return compiler.build(scanner.scanFiles(contents));
 }
 
+/**
+ * A stylesheet compiled from css text (not a file) over the given source files: what a module's own computer builds for
+ * the classes of the module's own files, which the frame's sheet (the chrome's classes alone, for a module that runs
+ * elsewhere) does not hold. `scanBase` is where `tailwindcss` resolves from.
+ */
+export async function compileCss(src, scanSources, scanBase) {
+  const compiler = await twCompile(src, { base: scanBase, onDependency: () => {} });
+  const contents = await Promise.all(scanSources.map(async (abs) => ({
+    content: await fs.promises.readFile(abs, 'utf8').catch(() => ''),
+    extension: path.extname(abs).slice(1) || 'js',
+  })));
+  const scanner = new Scanner({ sources: [] });
+  return compiler.build(scanner.scanFiles(contents));
+}
+
 export async function getJsx(srcPath) {
   const mtime = maxMtime([srcPath]);
   const cached = cache.get(srcPath);

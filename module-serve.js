@@ -15,6 +15,10 @@
 //     own relative imports read from its folder; two files that could answer it are neither, and said at the start.
 //     Nothing else of the folder leaves the sandbox: not backend.js, not a
 //     backend's helpers (db.js, an import script), not data/ or node_modules/, never a dot or underscore name.
+//     And `atelier-classes.css`: the rules of the classes the module's own files use (Tailwind's utilities over the stock
+//     theme, the chrome's `dark` variant), built once at the start. The frame's own sheet holds the chrome's classes
+//     alone, since the module's files are not on the machine that serves the frame; the frame document links this one
+//     after it, so a class a module wrote has its rule as it has on a local instance.
 //     The frame document, React, the chrome's kit and styles are served at the computer's address, not by the module.
 //
 // ctx.caller: the X-Atelier-Caller header (base64url JSON), the header a hosted instance reads. For a person's frame:
@@ -61,7 +65,8 @@ import http from 'node:http';
 import path from 'node:path';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { pathToFileURL } from 'node:url';
-import { getJsx } from './build.js';
+import { getJsx, compileCss } from './build.js';
+import { fileURLToPath } from 'node:url';
 import { readModuleJson, TOOL_NAME, BACKEND_FILE, FRONTEND_FILE } from './module-json.js';
 import { unfoundImports, unfoundSaid } from './backend-imports.js';
 import { createRouter, readJsonBody, headerObject, CALLER_HEADER, CALL_HEADER, MODULE_ID, UNTYPED } from './router.js';
@@ -121,6 +126,28 @@ function servable(abs) {
 }
 /** The relative imports of a built or source file: `from './x'`, `import './x'`, `import('./x')`. */
 const importsOf = (src) => [...src.matchAll(/(?:\bfrom\s*|\bimport\s*\(?\s*)['"](\.\.?\/[^'"]+)['"]/g)].map((m) => m[1]);
+/** The module's own frontend source files, as buildFrontend visited them: what its classes are read from. */
+const sources = [];
+/** The name the sheet of the module's own classes is served under, beside frontend.js. */
+const CLASSES_FILE = 'atelier-classes.css';
+// Utilities over the stock theme, in the same layers the chrome's sheet declares, so the two cascade as one sheet;
+// no preflight (the frame's sheet carries it); the faces as the chrome names them, so `font-sans` stays the chrome's.
+const CLASSES_SOURCE = `@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+@custom-variant dark (&:where(.dark, .dark *));
+@theme {
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', 'Menlo', 'Consolas', monospace;
+}
+`;
+async function buildClasses() {
+  if (!sources.length) return;
+  try {
+    const css = await compileCss(CLASSES_SOURCE, sources, path.dirname(fileURLToPath(import.meta.url)));
+    files.set(CLASSES_FILE, { content: css, contentType: 'text/css; charset=utf-8' });
+  } catch (e) { console.warn(`  ! ${qid}: the sheet of its own classes was not built (${e.message}); its frame has the chrome's classes alone`); }
+}
 async function buildFrontend() {
   // frontend.jsx and every module file it imports by a relative path, transitively
   const entry = [FRONTEND_FILE, 'frontend.js'].map((f) => path.join(o.dir, f)).find((f) => fs.existsSync(f));
@@ -131,6 +158,7 @@ async function buildFrontend() {
     const rel = servable(abs);
     if (!rel) return;
     const ext = path.extname(abs);
+    if (ext === '.jsx' || ext === '.js') sources.push(abs);
     if (ext !== '.jsx' && ext !== '.js') { if (RAW[ext]) files.set(rel, { content: fs.readFileSync(abs), contentType: RAW[ext] }); return; }
     const built = await getJsx(abs);
     const e = { content: built.content, contentType: built.contentType };
@@ -289,6 +317,7 @@ async function toolRequest(req, res, p, asked) {
 
 // ---- start: the frontend built, the backend mounted, then the socket ----
 await buildFrontend();
+await buildClasses();
 let teardown = null;
 const backend = path.join(o.dir, BACKEND_FILE);
 if (fs.existsSync(backend)) {

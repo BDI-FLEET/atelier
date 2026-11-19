@@ -105,6 +105,8 @@ export function createFrames(shell) {
     // #root carries the card's inner margin (the chrome's p-6, lg:p-10): the frame spans the card edge to edge and scrolls
     // to its edge, and a module's content sits where it always sat, inside that margin; a module that wants the edge
     // undoes it with its own negative margin, as it did before frames. lg is 64rem of the page: 47rem of the frame.
+    // a module that runs elsewhere serves the rules of its own classes beside its code (module-serve.js
+    // atelier-classes.css): linked after the frame's sheet, which holds the chrome's classes alone for it
     const html = `<!doctype html>
 <html lang="en">
 <head>
@@ -113,6 +115,7 @@ export function createFrames(shell) {
 <title>${escHtml(boot.title)}</title>
 <style>html{color-scheme:light dark}html,body{margin:0}</style>
 ${hasStyles ? `<link id="atelier-frame-styles" rel="stylesheet" href="${addressOf('/_frame/styles.css')}">` : ''}
+${m.remote ? `<link id="atelier-module-classes" rel="stylesheet" href="${addressOf(`/modules/${m.qualifiedId}/atelier-classes.css`)}">` : ''}
 <style>html,html body,html.dark,html.dark body{background:transparent}</style>
 <style>#root{box-sizing:border-box;min-height:100dvh;padding:1.5rem}@media (min-width:47rem){#root{padding:2.5rem}}</style>
 <script src="${addressOf('/_frame/react.js')}"></script>
