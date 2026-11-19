@@ -102,6 +102,9 @@ export function createFrames(shell) {
     // frame's first open fetches them in one wave and every later open fetches none; a module that runs elsewhere serves
     // its code at the same path on its own origin, so it is named too
     const named = assetTag() == null ? [] : ['/_frame/frame.js', '/_frame/ws-bridge.js', ...(hasKit ? ['/_frame/kit.js'] : []), `/modules/${m.qualifiedId}/frontend.js`];
+    // #root carries the card's inner margin (the chrome's p-6, lg:p-10): the frame spans the card edge to edge and scrolls
+    // to its edge, and a module's content sits where it always sat, inside that margin; a module that wants the edge
+    // undoes it with its own negative margin, as it did before frames. lg is 64rem of the page: 47rem of the frame.
     const html = `<!doctype html>
 <html lang="en">
 <head>
@@ -111,6 +114,7 @@ export function createFrames(shell) {
 <style>html{color-scheme:light dark}html,body{margin:0}</style>
 ${hasStyles ? `<link id="atelier-frame-styles" rel="stylesheet" href="${addressOf('/_frame/styles.css')}">` : ''}
 <style>html,html body,html.dark,html.dark body{background:transparent}</style>
+<style>#root{box-sizing:border-box;min-height:100dvh;padding:1.5rem}@media (min-width:47rem){#root{padding:2.5rem}}</style>
 <script src="${addressOf('/_frame/react.js')}"></script>
 <script src="${addressOf('/_frame/react-dom.js')}"></script>
 <script>window.__ATELIER_FRAME__ = ${JSON.stringify(boot).replace(/</g, '\\u003c')};</script>
