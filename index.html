@@ -17,6 +17,10 @@
        light/dark setting instead of forcing a color. -->
   <style>html{color-scheme:light dark}html,body{margin:0}</style>
 
+  <!-- The tab's icon is the chrome's (it sets this link's href once it runs). Named here, empty, so the browser does
+       not ask the server for /favicon.ico before the chrome has run: still zero pixels from the shell. -->
+  <link id="atelier-favicon" rel="icon" href="data:," />
+
   <!-- Render-blocking link to the active chrome's stylesheet, injected by
        atelier/server.js based on `chromeQid`. Pre-loading here (rather than
        letting the chrome's JS IIFE inject it later) eliminates a flash of

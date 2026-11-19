@@ -32,9 +32,14 @@ export function ModuleFrame({ qid, frameQid, origin, route, title, onTitle, buil
   }, [frameQid, origin]);
   const routeRef = useRef(route);
   routeRef.current = route;
+  // Nothing is sent before the frame has said `ready`: until then its window is still the empty document the browser
+  // starts an <iframe> with, on THIS page's origin, and a message addressed to the module's origin is refused (and
+  // logged). `init`, the answer to `ready`, carries the route and the theme as they are then, so nothing is lost.
+  const readyRef = useRef(false);
+  useEffect(() => { readyRef.current = false; }, [src]);
   const post = (type, data) => {
     const w = ref.current?.contentWindow;
-    if (w) w.postMessage({ atelier: type, ...data }, origin);
+    if (w && readyRef.current) w.postMessage({ atelier: type, ...data }, origin);
   };
 
   // Messages from the frame: only from this frame's window, only from its origin.
@@ -44,6 +49,7 @@ export function ModuleFrame({ qid, frameQid, origin, route, title, onTitle, buil
       const d = e.data;
       if (!d || typeof d !== 'object' || typeof d.atelier !== 'string') return;
       if (d.atelier === 'ready') {
+        readyRef.current = true;
         post('init', { route: routeRef.current, href: window.location.href, title, theme: themeNow() });
       } else if (d.atelier === 'route' && typeof d.route === 'string') {
         const target = buildUrl(ws, id, d.route);

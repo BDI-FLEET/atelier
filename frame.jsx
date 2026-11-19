@@ -17,6 +17,21 @@ import { wireWsBridge } from './ws-bridge.js';
 
 const F = window.__ATELIER_FRAME__ || {};
 const PARENT = F.parent && window.parent !== window ? F.parent : null;   // null: opened on its own, no bridge
+// A frame that loads again by itself (the module calls location.reload(), a "Reload" button) asks for its address without
+// `atelier-parent`, which was taken off it below: its document then names no parent, and it would stand there without
+// the bridge: no theme (light inside a dark page), no route, no title. So the parent is remembered for this tab, and a
+// framed document without one goes to its own address once more with it; the server names the parent only when it is
+// one this origin may be framed by, as on the first load. Once: the note is taken out before the try.
+const PARENT_NOTE = 'atelier:frame-parent';
+try {
+  if (PARENT) sessionStorage.setItem(PARENT_NOTE, PARENT);
+  else if (window.parent !== window) {
+    const was = sessionStorage.getItem(PARENT_NOTE);
+    sessionStorage.removeItem(PARENT_NOTE);
+    const u = new URL(window.location.href);
+    if (was && !u.searchParams.has('atelier-parent')) { u.searchParams.set('atelier-parent', was); window.location.replace(u.href); }
+  }
+} catch { /* no storage in this frame: it stays as it loaded */ }
 const BASE = `/${encodeURIComponent(F.workspace)}/${encodeURIComponent(F.id)}`;
 const toParent = (type, data) => { if (PARENT) window.parent.postMessage({ atelier: type, ...data }, PARENT); };
 
