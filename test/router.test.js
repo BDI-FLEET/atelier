@@ -187,3 +187,32 @@ test("the router an app is given has head, options and all, a trailing /* whose 
   assert.equal(await r2.handle(fakeReq('GET', '/api/global/m/items/%E0%A4%A'), bad), true)
   assert.equal(bad.status, 400)
 })
+
+test("a root route answers its prefix with and without the trailing slash, before a /* registered after it; every other route answers its path exactly", async () => {
+  const h = (tag) => (req, res) => res.json({ tag, params: req.params })
+  const asked = async (router, method, p) => {
+    const res = fakeRes()
+    return await router.handle(fakeReq(method, `/api/global/m${p}`), res) ? JSON.parse(res.body || '{}') : null
+  }
+  for (const root of ['/', '']) {
+    const r = createRouter()
+    r.scope('/api/global/m').get(root, h('root')).get('/items/:id', h('item')).get('/*', h('rest')).delete('/*', h('rest'))
+    for (const p of ['', '/']) {
+      assert.equal((await asked(r, 'GET', p))?.tag, 'root', `GET '${p}' under a root registered as '${root}'`)
+      assert.equal((await asked(r, 'HEAD', p))?.tag, 'root', `HEAD '${p}' under a root registered as '${root}'`)
+    }
+    assert.deepEqual(await asked(r, 'GET', '//'), { tag: 'rest', params: { '*': '/' } })
+    assert.deepEqual(await asked(r, 'GET', '/real/rest'), { tag: 'rest', params: { '*': 'real/rest' } })
+    assert.deepEqual(await asked(r, 'DELETE', '/'), { tag: 'rest', params: { '*': '' } })
+    assert.deepEqual(await asked(r, 'GET', '/items/42'), { tag: 'item', params: { id: '42' } })
+    assert.deepEqual(await asked(r, 'GET', '/items/42/'), { tag: 'rest', params: { '*': 'items/42/' } })
+  }
+  const only = createRouter()
+  only.scope('/api/global/m').get('/', h('root')).get('/only', h('only'))
+  assert.equal((await asked(only, 'GET', '/only'))?.tag, 'only')
+  assert.equal(await asked(only, 'GET', '/only/'), null)
+  assert.equal(await asked(only, 'GET', '//'), null)
+  const restFirst = createRouter()
+  restFirst.scope('/api/global/m').get('/*', h('rest')).get('/', h('root'))
+  assert.deepEqual(await asked(restFirst, 'GET', '/'), { tag: 'rest', params: { '*': '' } })
+})

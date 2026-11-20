@@ -64,6 +64,19 @@ test("req.user is { id, name } of the person ctx.caller names, null with no call
   }
 })
 
+test("its root route answers the app's address with and without the trailing slash, before its own /*, as the old host's did: a page that loads its frame from self.api + '/'", async () => {
+  const app = await serve()
+  try {
+    for (const p of [API, `${API}/`]) {
+      const got = await app.request('GET', p)
+      assert.deepEqual([got.status, got.json()], [200, { page: 'root' }], p)
+    }
+    assert.deepEqual((await app.request('GET', `${API}/about`)).json(), { page: 'about' })
+  } finally {
+    app.stop()
+  }
+})
+
 test("its routes by options, all and a trailing /* answer, and a HEAD is answered by its GET route without a body", async () => {
   const app = await serve()
   try {

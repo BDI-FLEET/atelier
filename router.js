@@ -2,12 +2,12 @@
  * (backend-host.js) and in a computer's serving sandbox (module-serve.js).
  *
  * A module mounts at `/api/<ws>/<id>`: `scope(prefix)` hands it get/post/put/delete/patch/head/options, and `all` for
- * any method, taking paths relative to that prefix (`/spaces`, `''` or `/` for the prefix itself), with `:name` params
- * and a trailing `/*` whose rest of the path is `req.params['*']` (the bare parent too, its rest ''); each returns the
- * router, so calls chain. A HEAD is answered by a GET route when no HEAD route comes first. First match wins. A path
- * whose params do not decode is answered 400. A handler gets `req.params`, `req.query`, `req.json()` (read once, shared
- * by every reader of the request) and `res.json(data, status?)`; a throw answers its `statusCode` (else 500) with
- * `{ error }`.
+ * any method, taking paths relative to that prefix (`/spaces`, `''` or `/` for the prefix itself, with or without its
+ * trailing slash; every other path exactly as written), with `:name` params and a trailing `/*` whose rest of the path
+ * is `req.params['*']` (the bare parent too, its rest ''); each returns the router, so calls chain. A HEAD is answered
+ * by a GET route when no HEAD route comes first. First match wins. A path whose params do not decode is answered 400.
+ * A handler gets `req.params`, `req.query`, `req.json()` (read once, shared by every reader of the request) and
+ * `res.json(data, status?)`; a throw answers its `statusCode` (else 500) with `{ error }`.
  */
 
 import { MAX_JSON_BODY } from './limits.js';
@@ -82,12 +82,12 @@ export const bodyOf = (req, untyped = false) => (req.__bodyPromise ??= readJsonB
 
 const WILDCARD = '/*';
 
-function compile(pattern) {
+function compile(pattern, root = false) {
   const paramNames = [];
   const rest = pattern.endsWith(WILDCARD);
   const re = new RegExp('^' + (rest ? pattern.slice(0, -WILDCARD.length) : pattern)
     .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    .replace(/:([a-zA-Z_]\w*)/g, (_, n) => { paramNames.push(n); return '([^/]+)'; }) + (rest ? '(?:/(.*))?' : '') + '$');
+    .replace(/:([a-zA-Z_]\w*)/g, (_, n) => { paramNames.push(n); return '([^/]+)'; }) + (rest ? '(?:/(.*))?' : root ? '/?' : '') + '$');
   if (rest) paramNames.push('*');
   return { re, paramNames };
 }
@@ -103,9 +103,10 @@ export function createRouter({ untyped = () => false } = {}) {
   /** The routes of one module, under `prefix`; `_dispose()` takes them out again (a hot swap). */
   function scope(prefix) {
     const mine = [];
-    const join = (p) => (!p || p === '/') ? prefix : prefix + (p.startsWith('/') ? p : '/' + p);
+    const isRoot = (p) => !p || p === '/';
+    const join = (p) => isRoot(p) ? prefix : prefix + (p.startsWith('/') ? p : '/' + p);
     const add = (method) => (p, handler) => {
-      const entry = { method, ...compile(join(p)), handler };
+      const entry = { method, ...compile(join(p), isRoot(p)), handler };
       routes.push(entry);
       mine.push(entry);
       return s;
