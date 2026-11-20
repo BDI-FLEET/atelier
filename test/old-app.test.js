@@ -64,7 +64,7 @@ test("req.user is { id, name } of the person ctx.caller names, null with no call
   }
 })
 
-test("its root route answers the app's address with and without the trailing slash, before its own /*, as the old host's did: a page that loads its frame from self.api + '/'", async () => {
+test("its routes answer their address with and without one trailing slash, the root before its own /*, as the old host's did: a page that loads its frame from self.api + '/'", async () => {
   const app = await serve()
   try {
     for (const p of [API, `${API}/`]) {
@@ -72,6 +72,7 @@ test("its root route answers the app's address with and without the trailing sla
       assert.deepEqual([got.status, got.json()], [200, { page: 'root' }], p)
     }
     assert.deepEqual((await app.request('GET', `${API}/about`)).json(), { page: 'about' })
+    assert.deepEqual((await app.request('GET', `${API}/me/`)).json(), { user: null, caller: null })
   } finally {
     app.stop()
   }

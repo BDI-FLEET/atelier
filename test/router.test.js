@@ -188,7 +188,7 @@ test("the router an app is given has head, options and all, a trailing /* whose 
   assert.equal(bad.status, 400)
 })
 
-test("a root route answers its prefix with and without the trailing slash, before a /* registered after it; every other route answers its path exactly", async () => {
+test("every route answers its address with and without one trailing slash, as the old host's did, the root too, before a /* registered after it; a /* keeps its rest", async () => {
   const h = (tag) => (req, res) => res.json({ tag, params: req.params })
   const asked = async (router, method, p) => {
     const res = fakeRes()
@@ -196,7 +196,7 @@ test("a root route answers its prefix with and without the trailing slash, befor
   }
   for (const root of ['/', '']) {
     const r = createRouter()
-    r.scope('/api/global/m').get(root, h('root')).get('/items/:id', h('item')).get('/*', h('rest')).delete('/*', h('rest'))
+    r.scope('/api/global/m').get(root, h('root')).get('/items/:id', h('item')).get('/listed/', h('listed')).get('/*', h('rest')).delete('/*', h('rest'))
     for (const p of ['', '/']) {
       assert.equal((await asked(r, 'GET', p))?.tag, 'root', `GET '${p}' under a root registered as '${root}'`)
       assert.equal((await asked(r, 'HEAD', p))?.tag, 'root', `HEAD '${p}' under a root registered as '${root}'`)
@@ -205,12 +205,18 @@ test("a root route answers its prefix with and without the trailing slash, befor
     assert.deepEqual(await asked(r, 'GET', '/real/rest'), { tag: 'rest', params: { '*': 'real/rest' } })
     assert.deepEqual(await asked(r, 'DELETE', '/'), { tag: 'rest', params: { '*': '' } })
     assert.deepEqual(await asked(r, 'GET', '/items/42'), { tag: 'item', params: { id: '42' } })
-    assert.deepEqual(await asked(r, 'GET', '/items/42/'), { tag: 'rest', params: { '*': 'items/42/' } })
+    assert.deepEqual(await asked(r, 'GET', '/items/42/'), { tag: 'item', params: { id: '42' } })
+    assert.deepEqual(await asked(r, 'HEAD', '/items/42/'), { tag: 'item', params: { id: '42' } })
+    assert.deepEqual(await asked(r, 'GET', '/items/42//'), { tag: 'rest', params: { '*': 'items/42//' } })
+    for (const p of ['/listed', '/listed/']) assert.equal((await asked(r, 'GET', p))?.tag, 'listed', p)
+    assert.deepEqual(await asked(r, 'GET', '/listed//'), { tag: 'rest', params: { '*': 'listed//' } })
   }
   const only = createRouter()
   only.scope('/api/global/m').get('/', h('root')).get('/only', h('only'))
   assert.equal((await asked(only, 'GET', '/only'))?.tag, 'only')
-  assert.equal(await asked(only, 'GET', '/only/'), null)
+  assert.equal((await asked(only, 'GET', '/only/'))?.tag, 'only')
+  assert.equal(await asked(only, 'GET', '/only//'), null)
+  assert.equal(await asked(only, 'GET', '/onlyx'), null)
   assert.equal(await asked(only, 'GET', '//'), null)
   const restFirst = createRouter()
   restFirst.scope('/api/global/m').get('/*', h('rest')).get('/', h('root'))
